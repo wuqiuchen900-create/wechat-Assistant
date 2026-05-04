@@ -3,10 +3,10 @@ import os
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import pyqtSlot
-
+from app.reminder_popup import ReminderPopup
 from app.main_window import MainWindow
 from core.engine import MessageEngine
-from config import BLACKLIST, WORK_KEYWORDS, URGENT_KEYWORDS, POLL_INTERVAL
+from config import BLACKLIST, POLL_INTERVAL
 
 
 class WeChatAssistantTray(QSystemTrayIcon):
@@ -28,9 +28,7 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.engine = MessageEngine()
         self.engine.configure(
             poll_interval=POLL_INTERVAL,
-            blacklist=BLACKLIST,
-            work_keywords=WORK_KEYWORDS,
-            urgent_keywords=URGENT_KEYWORDS
+            blacklist=BLACKLIST
         )
         # 连接信号
         self.engine.new_messages_signal.connect(self.main_window.add_new_messages)
@@ -65,15 +63,9 @@ class WeChatAssistantTray(QSystemTrayIcon):
     
     @pyqtSlot(dict)
     def on_urgent_message(self, msg):
-        """处理紧急消息：弹窗提醒"""
-        chat = msg.get('chat', '')
-        content = msg.get('content', '')
-        self.showMessage(
-            f"🔴 紧急消息 - {chat}",
-            content[:100],
-            QSystemTrayIcon.Warning,
-            5000
-        )
+        """处理紧急消息：弹出置顶提醒窗口"""
+        self.popup = ReminderPopup(msg)
+        self.popup.show_popup()
     
     def quit_app(self):
         self.engine.stop()

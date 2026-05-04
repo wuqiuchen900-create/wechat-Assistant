@@ -1,19 +1,45 @@
 # data/wechat_cli.py
-# 全局缓存
-_sessions_cache = []
-_sessions_cache_time = 0
 import subprocess
 import json
 import os
 import re
+import sys
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ========== 自动适配 wechat-cli 命令 ==========
+def _get_wechat_cli_cmd():
+    """返回执行 wechat-cli 的命令前缀字符串"""
+    # 1. 优先尝试命令行直接调用 wechat-cli
+    if shutil.which('wechat-cli'):
+        return 'wechat-cli'
+    # 2. 尝试通过 python -m wechat_cli 调用
+    try:
+        subprocess.run(
+            [sys.executable, '-m', 'wechat_cli', '--help'],
+            capture_output=True, timeout=5
+        )
+        return f'"{sys.executable}" -m wechat_cli'
+    except:
+        pass
+    # 3. 如果都不行，返回默认的 wechat-cli，留着手动调试
+    return 'wechat-cli'
+
+WECHAT_CLI_CMD = _get_wechat_cli_cmd()
+print(f"[自动检测] wechat-cli 调用命令: {WECHAT_CLI_CMD}")
+
+# ========== 原有缓存和函数 ==========
+_sessions_cache = []
+_sessions_cache_time = 0
+
 def run_wechat_cli(command):
+    """执行 wechat-cli 命令并返回 JSON 结果"""
     try:
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
+        full_cmd = f'{WECHAT_CLI_CMD} {command}'
         result = subprocess.run(
-            command,
+            full_cmd,
             capture_output=True,
             text=True,
             shell=True,
@@ -23,17 +49,19 @@ def run_wechat_cli(command):
             errors='replace'
         )
         if result.returncode != 0:
-            # 静默处理，不再打印到终端
-            # print(f"[wechat-cli] 命令失败: {command[:60]}")
-            # print(f"[wechat-cli] stderr: {result.stderr[:200]}")
             return None
         return json.loads(result.stdout)
-    except Exception as e:
-        # print(f"[错误] 执行命令失败: {e}")
+    except Exception:
         return None
 
+def get_contact_detail(username):
+    """获取联系人详情，包含头像 URL"""
+    data = run_wechat_cli(f'contacts --detail "{username}"')
+    if isinstance(data, dict):
+        return data
+    return None
 def get_unread_messages():
-    data = run_wechat_cli("wechat-cli unread")
+    data = run_wechat_cli("unread")
     if not isinstance(data, list):
         return []
     messages = []
@@ -46,12 +74,13 @@ def get_unread_messages():
                 'timestamp': session.get('timestamp', 0),
                 'time': session.get('time', ''),
                 'unread': session.get('unread', 0),
-                'is_group': session.get('is_group', False)
+                'is_group': session.get('is_group', False),
+                'username': session.get('username', ''),
             })
     return messages
 
+
 def _parse_history_text(text):
-    """解析 history 返回的文本格式: '[时间] 发送者: 内容'"""
     match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
     if match:
         return {
@@ -62,107 +91,28 @@ def _parse_history_text(text):
     return None
 
 
-def _fetch_one_chat(chat_name, limit_per_chat, is_group):
-    """拉取单个会话的历史消息"""
-    data = run_wechat_cli(f'wechat-cli history "{chat_name}" --limit {limit_per_chat}')
-    if not isinstance(data, dict):
-        return []
-    
-    raw_messages = data.get('messages', [])
-    if not isinstance(raw_messages, list):
-        return []
-    
-    result = []
-    for msg_text in raw_messages:
-        if not isinstance(msg_text, str):
-            continue
-        parsed = _parse_history_text(msg_text)
-        if parsed:
-            parsed['chat'] = chat_name
-            parsed['is_group'] = is_group
-            result.append(parsed)
-    return result
-
-
-def get_latest_messages(limit_per_chat=10, max_workers=3):
-    global _sessions_cache, _sessions_cache_time
-    import time as _time
-    
-    # 会话列表缓存 5 分钟，避免频繁拉取
-    now = _time.time()
-    if not _sessions_cache or (now - _sessions_cache_time) > 300:
-        sessions_data = run_wechat_cli("wechat-cli sessions --limit 100")
-        if isinstance(sessions_data, list):
-            _sessions_cache = sessions_data
-            _sessions_cache_time = now
-    
-    if not _sessions_cache:
-        return []
-    # ... 后续代码保持不变 ...
-
-    all_messages = []
-    
-    # 使用线程池并行拉取
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {}
-        for session in sessions_data:
-            chat_name = session.get('chat', '')
-            if not chat_name:
-                continue
-            future = executor.submit(_fetch_one_chat, chat_name, limit_per_chat, session.get('is_group', False))
-            futures[future] = chat_name
-        
-        # 收集结果
-        for future in as_completed(futures):
-            chat_name = futures[future]
-            try:
-                messages = future.result()
-                all_messages.extend(messages)
-            except Exception:
-                pass  # 单个会话失败不影响整体
-
-    # 按时间排序
-    all_messages.sort(key=lambda m: m.get('time', ''))
-    
-    # 去重
-    seen = set()
-    unique_msgs = []
-    for m in all_messages:
-        mid = f"{m.get('chat','')}|{m.get('sender','')}|{m.get('time','')}|{m.get('content','')[:30]}"
-        if mid not in seen:
-            seen.add(mid)
-            unique_msgs.append(m)
-    
-    return unique_msgs
 def get_sessions_list(limit=200):
-    """获取会话列表（带缓存）"""
     global _sessions_cache, _sessions_cache_time
     import time as _time
     now = _time.time()
     if not _sessions_cache or (now - _sessions_cache_time) > 300:
-        data = run_wechat_cli(f"wechat-cli sessions --limit {limit}")
+        data = run_wechat_cli(f"sessions --limit {limit}")
         if isinstance(data, list):
             _sessions_cache = data
             _sessions_cache_time = now
     return _sessions_cache
 
+
 def get_history_since(chat_name, start_time=None, limit=50):
-    """
-    获取指定会话的历史消息
-    如果 start_time 不为空，则只拉取该时间之后的消息（增量）
-    """
-    cmd = f'wechat-cli history "{chat_name}" --limit {limit}'
+    cmd = f'history "{chat_name}" --limit {limit}'
     if start_time:
         cmd += f' --start-time "{start_time}"'
-    
     data = run_wechat_cli(cmd)
     if not isinstance(data, dict):
         return []
-    
     raw_messages = data.get('messages', [])
     if not isinstance(raw_messages, list):
         return []
-    
     result = []
     for msg_text in raw_messages:
         if not isinstance(msg_text, str):
@@ -170,18 +120,48 @@ def get_history_since(chat_name, start_time=None, limit=50):
         parsed = _parse_history_text(msg_text)
         if parsed:
             parsed['chat'] = chat_name
-            parsed['is_group'] = False  # 需要从 sessions 判断，这里暂设
+            parsed['is_group'] = False
             result.append(parsed)
     return result
-
-def _parse_history_text(text):
-    """解析 history 返回的文本格式: '[时间] 发送者: 内容'"""
-    import re
-    match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
-    if match:
-        return {
-            'time': match.group(1),
-            'sender': match.group(2),
-            'content': match.group(3)
-        }
-    return None
+def _scan_wechat_dirs():
+    import os
+    possible_roots = [
+        r"D:\xwechat_files",
+        r"C:\xwechat_files",
+        os.path.expanduser(r"~\Documents\WeChat Files"),
+        r"D:\Documents\WeChat Files",
+    ]
+    for root in possible_roots:
+        if os.path.exists(root):
+            for folder in os.listdir(root):
+                full_path = os.path.join(root, folder)
+                if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, 'db_storage')):
+                    return full_path, folder
+    return None, None    
+def get_wechat_data_dir():
+    try:
+        from pywxdump.wx_core import get_wx_info
+        info = get_wx_info()
+        if info and isinstance(info, dict):
+            wxid = info.get('wxid', '')
+            data_dir = info.get('data_dir', '')
+            if not data_dir:
+                # 其他可能字段
+                for key in ['file_path', 'wx_path', 'dir']:
+                    if key in info:
+                        data_dir = info[key]
+                        break
+            if data_dir and os.path.exists(data_dir):
+                return data_dir, wxid
+            # 根据 wxid 尝试拼接
+            if wxid:
+                base_dirs = [r"D:\xwechat_files", r"C:\xwechat_files"]
+                for base in base_dirs:
+                    potential = os.path.join(base, wxid)
+                    if os.path.exists(potential):
+                        return potential, wxid
+    except Exception:
+        pass
+    
+    # 如果 pywxdump 失败，扫描目录
+    return _scan_wechat_dirs()
