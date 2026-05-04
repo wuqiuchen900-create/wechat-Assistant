@@ -263,7 +263,8 @@ class MainWindow(QMainWindow):
         
         # 消息计数
         self.msg_count = 0
-        
+        self.all_message_cards = []  # 按时间顺序存储所有卡片
+
         # 导航切换
         self.btn_realtime.clicked.connect(lambda: self._switch_page(0))
         self.btn_report.clicked.connect(lambda: self._switch_page(1))
@@ -297,26 +298,30 @@ class MainWindow(QMainWindow):
             card = MessageCard(msg)
             self.all_message_cards.append(card)
         
-        # 重建布局：清空所有卡片，按顺序重新添加
+        # 按时间戳从小到大排序（旧消息在上，新消息在下）
+        self.all_message_cards.sort(key=lambda c: c.msg.get('timestamp', 0))
+        
+        # 重建布局
         self._rebuild_message_list()
         
-        self.status_bar.setText(f"已捕获 {self.msg_count} 条消息 | 最新: {messages[-1].get('content', '')[:40]}...")
-    
+        if messages:
+            self.status_bar.setText(f"已捕获 {self.msg_count} 条消息 | 最新: {messages[-1].get('content', '')[:40]}...")
+
     def _rebuild_message_list(self):
-        """清空并重建消息列表，保证最新消息在最底部"""
+        """清空并重建消息列表，旧消息在上，新消息在下"""
         # 移除所有卡片控件（保留 stretch）
         while self.message_layout.count() > 1:
             item = self.message_layout.takeAt(0)
             if item.widget():
                 item.widget().hide()
                 item.widget().setParent(None)
-        
-        # 按顺序重新添加卡片（旧消息在上，新消息在下）
+
+        # 依次添加卡片：旧消息添加在前，新消息添加在后
         for card in self.all_message_cards:
             self.message_layout.insertWidget(self.message_layout.count() - 1, card)
             card.show()
-        
-        # 自动滚动到底部
+
+        # 自动滚动到底部（最新消息在底部）
         self.message_scroll.verticalScrollBar().setValue(
             self.message_scroll.verticalScrollBar().maximum()
         )
@@ -329,5 +334,4 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().setParent(None)
         self.msg_count = 0
-        self.all_message_cards = []  # 按时间顺序存储所有卡片
         self.status_bar.setText("列表已清空 | 等待新消息...")

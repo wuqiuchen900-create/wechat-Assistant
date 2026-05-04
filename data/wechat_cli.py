@@ -2,9 +2,10 @@
 import subprocess
 import json
 import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def run_wechat_cli(command):
-    """执行 wechat-cli 命令并返回 JSON 结果"""
     try:
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
@@ -19,19 +20,19 @@ def run_wechat_cli(command):
             errors='replace'
         )
         if result.returncode != 0:
+            # 静默处理，不再打印到终端
+            # print(f"[wechat-cli] 命令失败: {command[:60]}")
+            # print(f"[wechat-cli] stderr: {result.stderr[:200]}")
             return None
         return json.loads(result.stdout)
     except Exception as e:
-        print(f"[错误] 执行命令失败: {e}")
+        # print(f"[错误] 执行命令失败: {e}")
         return None
 
-
 def get_unread_messages():
-    """获取所有未读会话的消息"""
     data = run_wechat_cli("wechat-cli unread")
     if not isinstance(data, list):
         return []
-    
     messages = []
     for session in data:
         if session.get('unread', 0) > 0:
@@ -46,10 +47,80 @@ def get_unread_messages():
             })
     return messages
 
+def _parse_history_text(text):
+    """解析 history 返回的文本格式: '[时间] 发送者: 内容'"""
+    match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
+    if match:
+        return {
+            'time': match.group(1),
+            'sender': match.group(2),
+            'content': match.group(3)
+        }
+    return None
 
-def get_chat_history(chat_name, limit=50):
-    """获取指定会话的历史消息"""
-    data = run_wechat_cli(f'wechat-cli history "{chat_name}" --limit {limit}')
-    if not isinstance(data, list):
+
+def _fetch_one_chat(chat_name, limit_per_chat, is_group):
+    """拉取单个会话的历史消息"""
+    data = run_wechat_cli(f'wechat-cli history "{chat_name}" --limit {limit_per_chat}')
+    if not isinstance(data, dict):
         return []
-    return data
+    
+    raw_messages = data.get('messages', [])
+    if not isinstance(raw_messages, list):
+        return []
+    
+    result = []
+    for msg_text in raw_messages:
+        if not isinstance(msg_text, str):
+            continue
+        parsed = _parse_history_text(msg_text)
+        if parsed:
+            parsed['chat'] = chat_name
+            parsed['is_group'] = is_group
+            result.append(parsed)
+    return result
+
+
+def get_latest_messages(limit_per_chat=5, max_workers=5):
+    """
+    并行拉取所有会话的最新消息
+    max_workers: 同时拉取的会话数，越大越快但可能给 wechat-cli 造成压力
+    """
+    sessions_data = run_wechat_cli("wechat-cli sessions --limit 50")
+    if not isinstance(sessions_data, list):
+        return []
+
+    all_messages = []
+    
+    # 使用线程池并行拉取
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for session in sessions_data:
+            chat_name = session.get('chat', '')
+            if not chat_name:
+                continue
+            future = executor.submit(_fetch_one_chat, chat_name, limit_per_chat, session.get('is_group', False))
+            futures[future] = chat_name
+        
+        # 收集结果
+        for future in as_completed(futures):
+            chat_name = futures[future]
+            try:
+                messages = future.result()
+                all_messages.extend(messages)
+            except Exception:
+                pass  # 单个会话失败不影响整体
+
+    # 按时间排序
+    all_messages.sort(key=lambda m: m.get('time', ''))
+    
+    # 去重
+    seen = set()
+    unique_msgs = []
+    for m in all_messages:
+        mid = f"{m.get('chat','')}|{m.get('sender','')}|{m.get('time','')}|{m.get('content','')[:30]}"
+        if mid not in seen:
+            seen.add(mid)
+            unique_msgs.append(m)
+    
+    return unique_msgs
