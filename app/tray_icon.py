@@ -1,24 +1,42 @@
 # app/tray_icon.py
 import os
-from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import pyqtSlot
+
 from app.main_window import MainWindow
+from core.engine import MessageEngine
+from config import BLACKLIST, WORK_KEYWORDS, URGENT_KEYWORDS, POLL_INTERVAL
+
 
 class WeChatAssistantTray(QSystemTrayIcon):
     def __init__(self):
         super().__init__()
-        # 设置图标（使用我们准备的图标文件）
+        
+        # 图标
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'resources', 'icon.png')
         if os.path.exists(icon_path):
             self.setIcon(QIcon(icon_path))
         else:
-            # 如果没有图标文件，就用系统样式
             self.setIcon(QIcon())
-        
         self.setToolTip("微信信息管家")
         
         # 主窗口
         self.main_window = MainWindow()
+        
+        # 消息引擎
+        self.engine = MessageEngine()
+        self.engine.configure(
+            poll_interval=POLL_INTERVAL,
+            blacklist=BLACKLIST,
+            work_keywords=WORK_KEYWORDS,
+            urgent_keywords=URGENT_KEYWORDS
+        )
+        # 连接信号
+        self.engine.new_messages_signal.connect(self.main_window.add_new_messages)
+        self.engine.urgent_message_signal.connect(self.on_urgent_message)
+        # 启动引擎
+        self.engine.start()
         
         # 右键菜单
         self.menu = QMenu()
@@ -32,8 +50,6 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.menu.addAction(self.quit_action)
         
         self.setContextMenu(self.menu)
-        
-        # 双击托盘图标打开主面板
         self.activated.connect(self.on_tray_activated)
     
     def show_main_window(self):
@@ -45,8 +61,21 @@ class WeChatAssistantTray(QSystemTrayIcon):
         if reason == QSystemTrayIcon.DoubleClick:
             self.show_main_window()
     
+    @pyqtSlot(dict)
+    def on_urgent_message(self, msg):
+        """处理紧急消息：弹窗提醒"""
+        chat = msg.get('chat', '')
+        content = msg.get('content', '')
+        self.showMessage(
+            f"🔴 紧急消息 - {chat}",
+            content[:100],
+            QSystemTrayIcon.Warning,
+            5000
+        )
+    
     def quit_app(self):
+        self.engine.stop()
+        self.engine.wait(2000)  # 等待引擎线程结束
         self.main_window.close()
         self.hide()
-        from PyQt5.QtWidgets import QApplication
         QApplication.instance().quit()
