@@ -1,4 +1,7 @@
 # data/wechat_cli.py
+# 全局缓存
+_sessions_cache = []
+_sessions_cache_time = 0
 import subprocess
 import json
 import os
@@ -81,19 +84,26 @@ def _fetch_one_chat(chat_name, limit_per_chat, is_group):
     return result
 
 
-def get_latest_messages(limit_per_chat=5, max_workers=5):
-    """
-    并行拉取所有会话的最新消息
-    max_workers: 同时拉取的会话数，越大越快但可能给 wechat-cli 造成压力
-    """
-    sessions_data = run_wechat_cli("wechat-cli sessions --limit 50")
-    if not isinstance(sessions_data, list):
+def get_latest_messages(limit_per_chat=10, max_workers=3):
+    global _sessions_cache, _sessions_cache_time
+    import time as _time
+    
+    # 会话列表缓存 5 分钟，避免频繁拉取
+    now = _time.time()
+    if not _sessions_cache or (now - _sessions_cache_time) > 300:
+        sessions_data = run_wechat_cli("wechat-cli sessions --limit 100")
+        if isinstance(sessions_data, list):
+            _sessions_cache = sessions_data
+            _sessions_cache_time = now
+    
+    if not _sessions_cache:
         return []
+    # ... 后续代码保持不变 ...
 
     all_messages = []
     
     # 使用线程池并行拉取
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {}
         for session in sessions_data:
             chat_name = session.get('chat', '')

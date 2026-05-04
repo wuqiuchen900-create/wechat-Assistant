@@ -1,5 +1,5 @@
 # config.py
-
+INITIAL_HISTORY_LIMIT = 5  # 首次启动每个会话只拉5条历史
 # 黑名单
 BLACKLIST = [
     "顺丰速运", "京东快递", "中国联通", "地下城与勇士",

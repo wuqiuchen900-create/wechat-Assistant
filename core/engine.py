@@ -41,9 +41,20 @@ class MessageEngine(QThread):
         return result
 
     def run(self):
+        first_run = True
         while self._running:
             try:
-                all_msgs = get_latest_messages(limit_per_chat=5)
+                if first_run:
+                    # 首次启动：全量拉取每个会话的最近几条历史
+                    from data.wechat_cli import get_latest_messages
+                    all_msgs = get_latest_messages(limit_per_chat=10, max_workers=3)
+                    first_run = False
+                else:
+                    # 后续轮询：只查未读，轻量快速
+                    from data.wechat_cli import get_unread_messages
+                    all_msgs = get_unread_messages()
+                
+                # 下面过滤、去重、发信号的代码保持不变
                 filtered = self._filter_and_tag(all_msgs)
                 new_msgs, urgent_msgs = [], []
                 for msg in filtered:
@@ -60,6 +71,3 @@ class MessageEngine(QThread):
             except Exception as e:
                 print(f"[引擎错误] {e}")
             time.sleep(self._poll_interval)
-
-    def stop(self):
-        self._running = False
