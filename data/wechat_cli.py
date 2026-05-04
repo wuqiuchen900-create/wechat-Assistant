@@ -134,3 +134,54 @@ def get_latest_messages(limit_per_chat=10, max_workers=3):
             unique_msgs.append(m)
     
     return unique_msgs
+def get_sessions_list(limit=200):
+    """获取会话列表（带缓存）"""
+    global _sessions_cache, _sessions_cache_time
+    import time as _time
+    now = _time.time()
+    if not _sessions_cache or (now - _sessions_cache_time) > 300:
+        data = run_wechat_cli(f"wechat-cli sessions --limit {limit}")
+        if isinstance(data, list):
+            _sessions_cache = data
+            _sessions_cache_time = now
+    return _sessions_cache
+
+def get_history_since(chat_name, start_time=None, limit=50):
+    """
+    获取指定会话的历史消息
+    如果 start_time 不为空，则只拉取该时间之后的消息（增量）
+    """
+    cmd = f'wechat-cli history "{chat_name}" --limit {limit}'
+    if start_time:
+        cmd += f' --start-time "{start_time}"'
+    
+    data = run_wechat_cli(cmd)
+    if not isinstance(data, dict):
+        return []
+    
+    raw_messages = data.get('messages', [])
+    if not isinstance(raw_messages, list):
+        return []
+    
+    result = []
+    for msg_text in raw_messages:
+        if not isinstance(msg_text, str):
+            continue
+        parsed = _parse_history_text(msg_text)
+        if parsed:
+            parsed['chat'] = chat_name
+            parsed['is_group'] = False  # 需要从 sessions 判断，这里暂设
+            result.append(parsed)
+    return result
+
+def _parse_history_text(text):
+    """解析 history 返回的文本格式: '[时间] 发送者: 内容'"""
+    import re
+    match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
+    if match:
+        return {
+            'time': match.group(1),
+            'sender': match.group(2),
+            'content': match.group(3)
+        }
+    return None

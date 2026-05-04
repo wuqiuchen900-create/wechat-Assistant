@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
             nav_layout.addWidget(btn)
         
         nav_layout.addStretch()
-        
+
         # 底部信息
         footer = QLabel("v0.2 · 本地运行")
         footer.setStyleSheet("color: #adb5bd; font-size: 11px; padding: 10px;")
@@ -263,6 +263,12 @@ class MainWindow(QMainWindow):
         
         # 消息计数
         self.msg_count = 0
+        self.sync_progress_label = QLabel("首次同步: 等待开始...")
+        self.sync_progress_label.setStyleSheet("color: #6c757d; font-size: 12px; padding: 4px 10px;")
+# 把进度标签加到状态栏上方或导航栏底部，这里简单放在状态栏里
+
+
+# 注册信号回调（在 tray_icon.py 里连接）
         self.all_message_cards = []  # 按时间顺序存储所有卡片
 
         # 导航切换
@@ -335,3 +341,11 @@ class MainWindow(QMainWindow):
                 item.widget().setParent(None)
         self.msg_count = 0
         self.status_bar.setText("列表已清空 | 等待新消息...")
+    @pyqtSlot(int, int)
+    def update_sync_progress(self, current, total):
+        self.status_bar.setText(f"正在同步历史消息... ({current}/{total})")
+
+    @pyqtSlot()
+    def on_sync_finished(self):
+        from data.storage import get_message_count
+        self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")    

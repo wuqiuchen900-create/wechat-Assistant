@@ -36,6 +36,8 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.engine.new_messages_signal.connect(self.main_window.add_new_messages)
         self.engine.urgent_message_signal.connect(self.on_urgent_message)
         # 启动引擎
+        self.engine.sync_progress_signal.connect(self.main_window.update_sync_progress)
+        self.engine.sync_finished_signal.connect(self.main_window.on_sync_finished)
         self.engine.start()
         
         # 右键菜单
