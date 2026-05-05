@@ -90,13 +90,12 @@ class MessageEngine(QThread):
         self._sync_thread = QThread()
         self._sync_worker = SyncWorker()
         self._sync_worker.moveToThread(self._sync_thread)
-
         self._sync_worker.progress_signal.connect(self.sync_progress_signal.emit)
         self._sync_worker.finished_signal.connect(self.sync_finished_signal.emit)
         self._sync_worker.messages_ready.connect(self._process_synced_messages)
         self._sync_thread.started.connect(self._sync_worker.do_full_sync)
         self._sync_thread.start()
-
+        print("[引擎] SyncWorker 已创建并启动，开始转发进度信号到界面")
         # ===== 第三层：轻量实时轮询 =====
         db_conn = get_conn()
         loop_count = 0

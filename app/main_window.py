@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QTextEdit, QFrame,
                              QSplitter, QListWidget, QListWidgetItem,
                              QSizePolicy, QAbstractItemView, QPlainTextEdit,
-                             QStyledItemDelegate, QStyle, QButtonGroup, QProgressBar)
+                             QStyledItemDelegate, QStyle, QButtonGroup, QProgressBar,QStackedWidget)
 from PyQt5.QtCore import Qt, pyqtSlot, QRect, QRectF
 from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPen, QPainterPath, QPixmap
 import time
@@ -128,43 +128,67 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.stats_total)
         stats_layout.addStretch()
 
-        # ---------- 状态栏 ----------
+        # ---------- 状态栏区域（普通状态）----------
         self.status_bar = QLabel("就绪 | 等待新消息...")
         self.status_bar.setObjectName("statusBar")
-        # 彩色滚动进度条（同步时显示，平时隐藏）
+
+        # ---------- 进度条区域（同步时显示）----------
         self.sync_progress_bar = QProgressBar()
         self.sync_progress_bar.setRange(0, 100)
         self.sync_progress_bar.setValue(0)
-        self.sync_progress_bar.setTextVisible(True)
-        self.sync_progress_bar.setFormat("正在同步历史消息... %p%")
+        self.sync_progress_bar.setTextVisible(False)  # 不显示文字
+        self.sync_progress_bar.setFixedHeight(4)       # 细线高度
         self.sync_progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #e9ecef;
-                border-radius: 4px;
-                background: #f8f9fa;
-                height: 20px;
-                text-align: center;
-                font-size: 11px;
-                color: #495057;
+                border: none;
+                background: transparent;
             }
             QProgressBar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #6c5ce7, stop:0.5 #a29bfe, stop:1 #6c5ce7);
-                border-radius: 4px;
+                border-radius: 2px;
             }
         """)
-        self.sync_progress_bar.hide()  # 默认隐藏
+
+        # ---------- 用 QStackedWidget 切换显示 ----------
+        self.status_stack = QStackedWidget()
+        self.status_stack.addWidget(self.sync_progress_bar)  # index 0: 进度条
+        self.status_stack.addWidget(self.status_bar)         # index 1: 状态栏
+        self.status_stack.setCurrentIndex(1)                 # 默认显示状态栏
+
         # ---------- 垂直分割器 ----------
         v_splitter = QSplitter(Qt.Vertical)
+        v_splitter.setHandleWidth(8)
         v_splitter.addWidget(self.session_list)
         v_splitter.addWidget(self.stats_panel)
-        v_splitter.addWidget(self.sync_progress_bar)
-        v_splitter.addWidget(self.status_bar)
-        v_splitter.setSizes([380, 80, 20, 30])       # 4个控件，对应4个值
-        v_splitter.setStretchFactor(0, 5)             # 消息列表
-        v_splitter.setStretchFactor(1, 1)             # 统计面板
-        v_splitter.setStretchFactor(2, 0)             # 进度条（不自动拉伸）
-        v_splitter.setStretchFactor(3, 0)             # 状态栏（不自动拉伸）
+        v_splitter.addWidget(self.status_stack)      # ← 只加这一个
+        v_splitter.setSizes([380, 80, 30])
+        v_splitter.setStretchFactor(0, 5)
+        v_splitter.setStretchFactor(1, 1)
+        v_splitter.setStretchFactor(2, 0)
+        self.sync_progress_bar.hide()  # 默认隐藏
+
+        # ---------- 垂直分割器 ----------
+        v_splitter = QSplitter(Qt.Vertical)
+        v_splitter.addWidget(self.session_list)       # 0: 消息列表
+        v_splitter.addWidget(self.stats_panel)        # 1: 统计面板
+        v_splitter.addWidget(self.sync_progress_bar)   # 2: 进度条
+        v_splitter.addWidget(self.status_bar)          # 3: 状态栏
+
+        # 四个控件，四个高度值
+        v_splitter.setSizes([350, 80, 20, 30])
+
+        # 拉伸因子
+        v_splitter.setStretchFactor(0, 5)   # 消息列表可拉伸
+        v_splitter.setStretchFactor(1, 1)   # 统计面板微拉伸
+        v_splitter.setStretchFactor(2, 0)   # 进度条固定高度
+        v_splitter.setStretchFactor(3, 0)   # 状态栏固定高度
+
+        # 关键：禁止子控件折叠到0高度
+        v_splitter.setCollapsible(0, False)
+        v_splitter.setCollapsible(1, False)
+        v_splitter.setCollapsible(2, False)
+        v_splitter.setCollapsible(3, False)        # 状态栏（不自动拉伸）
 
         # ---------- 将垂直分割器放入左侧消息容器 ----------
         self.msg_container = QWidget()
@@ -437,31 +461,24 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, int)
     def update_sync_progress(self, current, total):
-        print(f"[调试] 进度信号到达: current={current}, total={total}")
-        if current == -1 and total == -1:
-            # 不确定模式（来回滚动）
-            self.sync_progress_bar.setRange(0, 0)
-            self.sync_progress_bar.show()
+        if total == -1:
+            # 百分比模式：切换到进度条，更新百分比
+            self.status_stack.setCurrentIndex(0)
+            self.sync_progress_bar.setValue(current)
         elif total > 0:
-            # 正常数字进度
-            self.sync_progress_bar.setRange(0, total)
-            self.sync_progress_bar.setValue(current)
-            self.sync_progress_bar.setFormat(f"正在同步历史消息... {current}/{total}")
-            self.sync_progress_bar.show()
-        elif total == -1:
-            # 百分比模式
-            self.sync_progress_bar.setRange(0, 100)
-            self.sync_progress_bar.setValue(current)
-            self.sync_progress_bar.setFormat(f"正在同步历史消息... 已完成 {current}%")
-            self.sync_progress_bar.show()
+            # 数字模式（兼容老逻辑）
+            self.status_stack.setCurrentIndex(0)
+            percent = int(current / total * 100)
+            self.sync_progress_bar.setValue(percent)
+        # 不需要 show()，QStackedWidget 已经完成了显示切换
 
     @pyqtSlot()
     def on_sync_finished(self):
+        # 切换回状态栏
+        self.status_stack.setCurrentIndex(1)
         from data.storage import get_message_count
-        self.status_bar.setText("正在加载头像...")
-        self._load_avatars()
-        # _load_avatars 内部已经调用了 self._update_session_list()
         self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")
+        # ... 后面的头像加载代码可选择性保留
 
         # 收集所有唯一的 username
         usernames = set()

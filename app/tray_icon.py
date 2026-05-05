@@ -6,8 +6,8 @@ from PyQt5.QtCore import pyqtSlot
 from app.reminder_popup import ReminderPopup
 from app.main_window import MainWindow
 from core.engine import MessageEngine
-
-
+from PyQt5.QtCore import pyqtSlot, QThread
+from PyQt5.QtCore import pyqtSlot, QThread, QTimer
 
 class WeChatAssistantTray(QSystemTrayIcon):
     def __init__(self):
@@ -34,7 +34,16 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.engine.sync_progress_signal.connect(self.main_window.update_sync_progress)
         self.engine.sync_finished_signal.connect(self.main_window.on_sync_finished)
         self.engine.start()
-        
+        # 延迟连接 SyncWorker 的进度信号到主窗口，确保 SyncWorker 已创建
+        QTimer.singleShot(1000, self._connect_sync_progress)
+
+    def _connect_sync_progress(self):
+        if hasattr(self.engine, '_sync_worker'):
+            self.engine._sync_worker.progress_signal.connect(self.main_window.update_sync_progress)
+            print("[tray] 成功连接 SyncWorker.progress_signal 到主窗口")
+        else:
+            print("[tray] 1秒后仍未找到 _sync_worker，再等1秒")
+            QTimer.singleShot(1000, self._connect_sync_progress)        
         # 右键菜单
         self.menu = QMenu()
         self.show_action = QAction("显示主面板")

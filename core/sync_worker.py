@@ -21,6 +21,7 @@ class SyncWorker(QObject):
         """执行全量同步：拉取所有会话的历史消息"""
         sessions = get_sessions_list(limit=300)
         total = len(sessions)
+        print("[SyncWorker] do_full_sync 开始执行，总会话数:", total)
         db_conn = get_conn()
         
         for i, session in enumerate(sessions):
@@ -58,7 +59,9 @@ class SyncWorker(QObject):
                 update_sync_progress(chat_name, last_msg_time, last_ts)
             
             # 5. 发送进度和消息
-            self.progress_signal.emit(i + 1, total)
+            print(f"[SyncWorker] 发射进度信号: {i+1}/{total}")
+            percent = int((i + 1) / total * 100)
+            self.progress_signal.emit(percent, -1)  # -1 表示百分比模式
             self.messages_ready.emit(msgs)
             
             # 6. 温柔地跑，避免CPU猛冲
