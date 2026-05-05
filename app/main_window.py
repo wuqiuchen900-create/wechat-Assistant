@@ -3,8 +3,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QTextEdit, QFrame,
                              QSplitter, QListWidget, QListWidgetItem,
                              QSizePolicy, QAbstractItemView, QPlainTextEdit,
-                             QStyledItemDelegate, QStyle, QButtonGroup)
-from PyQt5.QtCore import Qt, pyqtSlot, QRect
+                             QStyledItemDelegate, QStyle, QButtonGroup, QProgressBar)
+from PyQt5.QtCore import Qt, pyqtSlot, QRect, QRectF
 from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPen, QPainterPath, QPixmap
 import time
 import os
@@ -12,7 +12,7 @@ from data.wechat_cli import get_wechat_data_dir
 import requests
 from data.wechat_cli import get_contact_detail
 from app.settings_page import SettingsPage
-
+from PyQt5.QtWidgets import QApplication
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.btn_realtime.clicked.connect(lambda: self._switch_page(0))
         self.btn_report.clicked.connect(lambda: self._switch_page(1))
         self.btn_history.clicked.connect(lambda: self._switch_page(2))
-        self.btn_settings.clicked.connect(lambda: self._switch_page(3))  # 组内按钮互斥
+        self.btn_settings.clicked.connect(self._open_settings)  # 组内按钮互斥
 
         footer = QLabel("v0.4 · 本地运行")
         footer.setStyleSheet("color: #adb5bd; font-size: 11px; padding: 10px;")
@@ -131,17 +131,40 @@ class MainWindow(QMainWindow):
         # ---------- 状态栏 ----------
         self.status_bar = QLabel("就绪 | 等待新消息...")
         self.status_bar.setObjectName("statusBar")
-
+        # 彩色滚动进度条（同步时显示，平时隐藏）
+        self.sync_progress_bar = QProgressBar()
+        self.sync_progress_bar.setRange(0, 100)
+        self.sync_progress_bar.setValue(0)
+        self.sync_progress_bar.setTextVisible(True)
+        self.sync_progress_bar.setFormat("正在同步历史消息... %p%")
+        self.sync_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #e9ecef;
+                border-radius: 4px;
+                background: #f8f9fa;
+                height: 20px;
+                text-align: center;
+                font-size: 11px;
+                color: #495057;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #6c5ce7, stop:0.5 #a29bfe, stop:1 #6c5ce7);
+                border-radius: 4px;
+            }
+        """)
+        self.sync_progress_bar.hide()  # 默认隐藏
         # ---------- 垂直分割器 ----------
         v_splitter = QSplitter(Qt.Vertical)
-        v_splitter.setHandleWidth(8)
         v_splitter.addWidget(self.session_list)
         v_splitter.addWidget(self.stats_panel)
+        v_splitter.addWidget(self.sync_progress_bar)
         v_splitter.addWidget(self.status_bar)
-        v_splitter.setSizes([400, 80, 30])
-        v_splitter.setStretchFactor(0, 5)      # 消息列表占5份
-        v_splitter.setStretchFactor(1, 1)      # 统计面板占1份
-        v_splitter.setStretchFactor(2, 0)      # 状态栏高度固定
+        v_splitter.setSizes([380, 80, 20, 30])       # 4个控件，对应4个值
+        v_splitter.setStretchFactor(0, 5)             # 消息列表
+        v_splitter.setStretchFactor(1, 1)             # 统计面板
+        v_splitter.setStretchFactor(2, 0)             # 进度条（不自动拉伸）
+        v_splitter.setStretchFactor(3, 0)             # 状态栏（不自动拉伸）
 
         # ---------- 将垂直分割器放入左侧消息容器 ----------
         self.msg_container = QWidget()
@@ -175,9 +198,6 @@ class MainWindow(QMainWindow):
         h_splitter.addWidget(self.detail_panel)
         h_splitter.setSizes([400, 400])
         # 设置页面（默认隐藏）
-        self.settings_page = SettingsPage()
-        self.settings_page.hide()
-        h_splitter.addWidget(self.settings_page)
         right_outer.addWidget(h_splitter)
         main_layout.addLayout(right_outer)
 
@@ -204,10 +224,16 @@ class MainWindow(QMainWindow):
     def _update_session_list(self):
         self.session_list.clear()
         
+        # 直接用缓存，不每次查数据库
+        blacklist = getattr(self, '_blacklist_cache', [])
+        
         # 直接从 all_messages_list 聚合每个会话的最后一条消息
         chat_last_msg = {}
         for msg in self.all_messages_list:
             chat = msg.get('chat', '')
+            # 模糊匹配：只要会话名包含黑名单中的任一关键词，就屏蔽
+            if any(kw in chat for kw in blacklist if kw):
+                continue
             time_ts = self._parse_time(msg.get('time', ''))
             if chat not in chat_last_msg or time_ts > chat_last_msg[chat][0]:
                 chat_last_msg[chat] = (time_ts, msg)
@@ -273,9 +299,16 @@ class MainWindow(QMainWindow):
         # 页面切换
         is_settings = (index == 3)
         self.msg_container.setVisible(not is_settings)
-        self.detail_panel.setVisible(not is_settings)
-        self.settings_page.setVisible(is_settings)        
-
+        self.detail_panel.setVisible(not is_settings)      
+    def _open_settings(self):
+        """打开独立设置窗口"""
+        from app.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        dialog.exec_()
+        # 刷新黑名单缓存
+        self._refresh_blacklist_cache()
+        # 立即刷新会话列表
+        self._update_session_list()
     # ---------- 消息输入 ----------
     @pyqtSlot(list)
     def add_new_messages(self, messages):
@@ -315,13 +348,6 @@ class MainWindow(QMainWindow):
         self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
         if messages:
             self.status_bar.setText(f"最新: {messages[-1].get('content', '')[:40]}...")
-                # 临时诊断：查看吴秋辰的最后几条消息及时间戳
-        if any(m.get('chat') == '吴秋辰' for m in messages):
-            qiu_msgs = [m for m in self.all_messages_list if m.get('chat') == '吴秋辰']
-            print("\n===== 诊断：吴秋辰的消息列表（最后5条）=====")
-            for m in qiu_msgs[-5:]:
-                print(f"  时间字符串: {m.get('time')} | 解析后时间戳: {self._parse_time(m.get('time'))}")
-            print("=============================================\n")
     # ---------- 点击会话查看详情 ----------
     def on_session_clicked(self, item):
         chat = item.data(Qt.UserRole)
@@ -338,12 +364,17 @@ class MainWindow(QMainWindow):
                 line = f"🔴 {line}"
             text += line + "\n"
         self.detail_content.setPlainText(text or "暂无消息")
-
+    def _refresh_blacklist_cache(self):
+        """刷新黑名单缓存"""
+        from data.storage import get_all_blacklist
+        self._blacklist_cache = get_all_blacklist()
     def clear_messages(self):
         self.session_list.clear()
         self.session_data.clear()
         self.all_messages_list.clear()
         self.msg_count = 0
+        self._blacklist_cache = []  # 黑名单缓存
+        self._refresh_blacklist_cache()
         self.stats_today.setText("📊 今日: 0 条")
         self.stats_active.setText("💬 活跃会话: 0 个")
         self.stats_urgent.setText("🔴 紧急: 0 条")
@@ -380,7 +411,9 @@ class MainWindow(QMainWindow):
                 self.avatar_cache[username] = None
         
         self._update_session_list()
-
+                # 让界面及时响应，避免假死
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
 
     def _find_local_avatar(self, username):
         """在本地头像目录中查找匹配的头像文件"""
@@ -404,7 +437,23 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, int)
     def update_sync_progress(self, current, total):
-        self.status_bar.setText(f"正在同步历史消息... ({current}/{total})")
+        print(f"[调试] 进度信号到达: current={current}, total={total}")
+        if current == -1 and total == -1:
+            # 不确定模式（来回滚动）
+            self.sync_progress_bar.setRange(0, 0)
+            self.sync_progress_bar.show()
+        elif total > 0:
+            # 正常数字进度
+            self.sync_progress_bar.setRange(0, total)
+            self.sync_progress_bar.setValue(current)
+            self.sync_progress_bar.setFormat(f"正在同步历史消息... {current}/{total}")
+            self.sync_progress_bar.show()
+        elif total == -1:
+            # 百分比模式
+            self.sync_progress_bar.setRange(0, 100)
+            self.sync_progress_bar.setValue(current)
+            self.sync_progress_bar.setFormat(f"正在同步历史消息... 已完成 {current}%")
+            self.sync_progress_bar.show()
 
     @pyqtSlot()
     def on_sync_finished(self):
@@ -495,7 +544,7 @@ class AvatarDelegate(QStyledItemDelegate):
         if pixmap:
             painter.save()
             path = QPainterPath()
-            path.addEllipse(avatar_rect)
+            path.addEllipse(QRectF(avatar_rect))
             painter.setClipPath(path)
             painter.drawPixmap(avatar_rect, pixmap)
             painter.restore()

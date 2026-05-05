@@ -1,14 +1,20 @@
 # core/engine.py
 from PyQt5.QtCore import QThread, pyqtSignal
-from data.wechat_cli import get_sessions_list, get_history_since, get_unread_messages, get_new_messages
-from data.storage import init_db, save_messages_batch, get_message_count, is_db_initialized, update_sync_progress, get_all_messages
+from data.wechat_cli import get_new_messages
+from data.storage import (
+    init_db, get_message_count, get_all_messages,
+    get_conn, save_messages_batch_with_conn, update_sync_progress,
+    get_all_settings, get_all_keywords, get_all_blacklist
+)
 import time
-from data.storage import save_messages_batch_fast
+from core.sync_worker import SyncWorker
+
+
 class MessageEngine(QThread):
     new_messages_signal = pyqtSignal(list)
     urgent_message_signal = pyqtSignal(dict)
-    sync_progress_signal = pyqtSignal(int, int)  # 当前进度, 总数
-    sync_finished_signal = pyqtSignal()          # 全量同步完成
+    sync_progress_signal = pyqtSignal(int, int)
+    sync_finished_signal = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -18,24 +24,39 @@ class MessageEngine(QThread):
         self._blacklist = []
         self._work_keywords = []
         self._urgent_keywords = []
-        self._initial_sync = False
-        self._last_ui_update = 0  # 是否需要首次全量同步
+        self._enable_full_sync = True
+        self._last_ui_update = 0
+        self._enable_popup = True
 
-    def configure(self, poll_interval=30, blacklist=None):
-        self._poll_interval = poll_interval
-        self._blacklist = blacklist or []
-        self._reload_keywords()
-    def _reload_keywords(self):
-        """从数据库重新加载关键词"""
-        from data.storage import get_all_keywords
+    def configure(self):
+        """初始化数据库并加载所有设置"""
+        init_db()
+        settings = get_all_settings()
+        self._poll_interval = int(settings.get('poll_interval', '30'))
+        self._enable_full_sync = settings.get('enable_full_sync', '1') == '1'
+        self._enable_popup = settings.get('enable_popup', '1') == '1'
         self._work_keywords, self._urgent_keywords = get_all_keywords()
+        self._blacklist = get_all_blacklist()
+
+    def _reload_keywords(self):
+        self._work_keywords, self._urgent_keywords = get_all_keywords()
+
+    def _reload_blacklist(self):
+        self._blacklist = get_all_blacklist()
+
+    def _reload_reminder_settings(self):
+        settings = get_all_settings()
+        self._enable_popup = settings.get('enable_popup', '1') == '1'
+
     def _make_message_id(self, msg):
         return f"{msg.get('chat','')}|{msg.get('sender','')}|{msg.get('time','')}|{msg.get('content','')[:30]}"
 
     def _is_blacklisted(self, msg):
-        return msg.get('chat', '') in self._blacklist
+        chat = msg.get('chat', '')
+        return any(kw in chat for kw in self._blacklist if kw)
 
     def _filter_and_tag(self, messages):
+        """快速过滤和打标签（在实时拉取时用）"""
         result = []
         for msg in messages:
             if self._is_blacklisted(msg):
@@ -47,112 +68,84 @@ class MessageEngine(QThread):
             result.append(msg)
         return result
 
-    def _do_full_sync(self):
-        init_db()
-        sessions = get_sessions_list(limit=200)
-        total = len(sessions)
-        batch_buffer = []
-        BATCH_SIZE = 10
-
-        for i, session in enumerate(sessions):
-            if not self._running:
-                break
-
-            chat_name = session.get('chat', '')
-            if not chat_name:
-                continue
-
-            msgs = get_history_since(chat_name, limit=50)
-            if not msgs:
-                continue
-
-            is_group = session.get('is_group', False)
-            for m in msgs:
-                m['is_group'] = is_group
-                m['username'] = session.get('username', '')  # 添加这行
-
-            filtered = self._filter_and_tag(msgs)
-
-            for msg in filtered:
-                msg_id = self._make_message_id(msg)
-                if msg_id not in self._known_message_ids:
-                    self._known_message_ids.add(msg_id)
-                    batch_buffer.append(msg)
-
-            if len(batch_buffer) >= BATCH_SIZE * 5 or i == total - 1:
-                if batch_buffer:
-                    # 保存到数据库（用大事务快速写入）
-                    save_messages_batch_fast(batch_buffer)
-                    # 控制界面刷新频率
-                    if time.time() - self._last_ui_update > 2.0:
-                        self.new_messages_signal.emit(batch_buffer[:50])
-                        self._last_ui_update = time.time()
-                    batch_buffer.clear()
-
-            # 记录该会话同步进度，防止下次启动重复全量同步
-            if msgs:
-                last_msg_time = msgs[-1].get('time', '')
-                try:
-                    import datetime
-                    dt = datetime.datetime.strptime(last_msg_time, '%Y-%m-%d %H:%M')
-                    last_ts = int(dt.timestamp())
-                except:
-                    last_ts = 0
-                from data.storage import update_sync_progress
-                update_sync_progress(chat_name, last_msg_time, last_ts)
-
-            self.sync_progress_signal.emit(i + 1, total)
-            time.sleep(0.2)
-
-        self.sync_finished_signal.emit()
-
     def run(self):
+        """主引擎线程入口"""
         init_db()
-        
-        if not is_db_initialized():
-            self._do_full_sync()
-        
-        # 从本地数据库加载所有缓存消息到界面
-        from data.storage import get_all_messages
-        cached = get_all_messages(limit=99999)
-        if cached:
-            self.new_messages_signal.emit(cached)
-        # 后续增量轮询
+
+        # ===== 第一层：启动秒开缓存 =====
+        total_cached = get_message_count()
+        page_size = 100
+        offset = 0
+        while offset < total_cached:
+            cached = get_all_messages(limit=99999)
+            batch = cached[offset:offset + page_size]
+            if batch:
+                # 快速打标签
+                tagged = self._filter_and_tag(batch)
+                self.new_messages_signal.emit(tagged)
+                time.sleep(0.05)
+            offset += page_size
+
+        # ===== 第二层：启动后台同步线程 =====
+        self._sync_thread = QThread()
+        self._sync_worker = SyncWorker()
+        self._sync_worker.moveToThread(self._sync_thread)
+
+        self._sync_worker.progress_signal.connect(self.sync_progress_signal.emit)
+        self._sync_worker.finished_signal.connect(self.sync_finished_signal.emit)
+        self._sync_worker.messages_ready.connect(self._process_synced_messages)
+        self._sync_thread.started.connect(self._sync_worker.do_full_sync)
+        self._sync_thread.start()
+
+        # ===== 第三层：轻量实时轮询 =====
+        db_conn = get_conn()
         loop_count = 0
+
         while self._running:
-            loop_count += 1             # ← 新加
-            if loop_count % 5 == 0:     # ← 新加（每5轮刷新一次关键词）
-                self._reload_keywords() # ← 新加            
+            loop_count += 1
+            if loop_count % 5 == 0:
+                self._reload_keywords()
+                self._reload_blacklist()
+                self._reload_reminder_settings()
+
             try:
-                # 用增量新消息做实时检测
-                unread = get_new_messages()
-                filtered = self._filter_and_tag(unread)
-                
-                new_msgs, urgent_msgs = [], []
-                for msg in filtered:
-                    msg_id = self._make_message_id(msg)
-                    # 从数据库查这个ID是否已存在，避免重复写入
-                    from data.storage import get_conn
-                    conn = get_conn()
-                    exists = conn.execute("SELECT 1 FROM messages WHERE id=?", (msg_id,)).fetchone()
-                    conn.close()
-                    
-                    if not exists:
-                        new_msgs.append(msg)
-                        self._known_message_ids.add(msg_id)
-                    
-                    if msg.get('is_urgent'):
-                        urgent_msgs.append(msg)
-                
-                if new_msgs:
-                    save_messages_batch_fast(new_msgs)
-                # 无论是否新消息，都发到界面刷新
-                if filtered:
-                    self.new_messages_signal.emit(filtered)
-                for msg in urgent_msgs:
-                    self.urgent_message_signal.emit(msg)
-                    
+                latest_msgs = get_new_messages()
+                if latest_msgs:
+                    # 快速过滤
+                    filtered = self._filter_and_tag(latest_msgs)
+                    # 快速写入
+                    new_count = save_messages_batch_with_conn(db_conn, filtered)
+                    if new_count > 0:
+                        # 只发真正新增的消息到界面
+                        new_msgs = []
+                        for m in filtered:
+                            mid = self._make_message_id(m)
+                            if mid not in self._known_message_ids:
+                                self._known_message_ids.add(mid)
+                                new_msgs.append(m)
+                        if new_msgs:
+                            self.new_messages_signal.emit(new_msgs)
+                    # 紧急消息弹窗
+                    if self._enable_popup:
+                        for m in filtered:
+                            if m.get('is_urgent'):
+                                self.urgent_message_signal.emit(m)
             except Exception as e:
-                print(f"[引擎错误] {e}")
+                print(f"[实时轮询错误] {e}")
+
+            time.sleep(self._poll_interval)
+
+        # 退出清理
+        self._sync_worker.stop()
+        self._sync_thread.quit()
+        self._sync_thread.wait()
+        db_conn.close()
+
+    def _process_synced_messages(self, messages):
+        """接收后台同步的消息，打标签后发给界面"""
+        tagged = self._filter_and_tag(messages)
+        if tagged:
+            self.new_messages_signal.emit(tagged)
+
     def stop(self):
         self._running = False

@@ -185,3 +185,65 @@ def get_wechat_data_dir():
     
     # 如果 pywxdump 失败，扫描目录
     return _scan_wechat_dirs()
+def get_latest_messages_for_all_chats(limit_per_chat=3):
+    """
+    拉取所有会话的最新消息（不依赖未读标记）
+    原理：先获取会话列表，再逐个拉取每个会话的最近几条消息
+    """
+    sessions = get_sessions_list(limit=300)
+    all_messages = []
+    
+    for session in sessions:
+        chat_name = session.get('chat', '')
+        if not chat_name:
+            continue
+        
+        # 拉取该会话最近几条消息
+        msgs = get_history_since(chat_name, limit=limit_per_chat)
+        if not msgs:
+            continue
+        
+        # 补全会话信息
+        is_group = session.get('is_group', False)
+        username = session.get('username', '')
+        for m in msgs:
+            m['is_group'] = is_group
+            m['username'] = username
+        
+        all_messages.extend(msgs)
+    
+    # 按时间排序（从旧到新）
+    all_messages.sort(key=lambda m: m.get('time', ''))
+    return all_messages    
+def get_incremental_messages(limit_per_chat=5):
+    """
+    增量拉取所有会话的新消息
+    原理：查询每个会话的最后同步时间，用 history --start-time 只拉增量
+    """
+    sessions = get_sessions_list(limit=200)
+    all_messages = []
+
+    for session in sessions:
+        chat_name = session.get('chat', '')
+        if not chat_name:
+            continue
+
+        # 从数据库获取上次同步时间
+        from data.storage import get_last_sync_time
+        last_time = get_last_sync_time(chat_name)
+
+        # 拉取该会话自上次同步以来的新消息
+        msgs = get_history_since(chat_name, start_time=last_time, limit=limit_per_chat)
+        if not msgs:
+            continue
+
+        is_group = session.get('is_group', False)
+        username = session.get('username', '')
+        for m in msgs:
+            m['is_group'] = is_group
+            m['username'] = username
+
+        all_messages.extend(msgs)
+
+    all_messages.sort(key=lambda m: m.get('time', ''))
+    return all_messages

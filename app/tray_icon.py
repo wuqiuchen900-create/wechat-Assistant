@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSlot
 from app.reminder_popup import ReminderPopup
 from app.main_window import MainWindow
 from core.engine import MessageEngine
-from config import BLACKLIST, POLL_INTERVAL
+
 
 
 class WeChatAssistantTray(QSystemTrayIcon):
@@ -26,10 +26,7 @@ class WeChatAssistantTray(QSystemTrayIcon):
         
         # 消息引擎
         self.engine = MessageEngine()
-        self.engine.configure(
-            poll_interval=POLL_INTERVAL,
-            blacklist=BLACKLIST
-        )
+        self.engine.configure()
         # 连接信号
         self.engine.new_messages_signal.connect(self.main_window.add_new_messages)
         self.engine.urgent_message_signal.connect(self.on_urgent_message)
