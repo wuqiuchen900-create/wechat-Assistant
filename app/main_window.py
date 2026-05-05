@@ -203,27 +203,31 @@ class MainWindow(QMainWindow):
     # ---------- 排序与时间解析 ----------
     def _update_session_list(self):
         self.session_list.clear()
-        chat_last_time = {}
+        
+        # 直接从 all_messages_list 聚合每个会话的最后一条消息
+        chat_last_msg = {}
         for msg in self.all_messages_list:
             chat = msg.get('chat', '')
-            time_str = msg.get('time', '')
-            time_ts = self._parse_time(time_str)
-            if chat not in chat_last_time or time_ts > chat_last_time[chat][0]:
-                chat_last_time[chat] = (time_ts, time_str, msg)
-
-        sorted_chats = sorted(chat_last_time.items(), key=lambda kv: kv[1][0], reverse=True)
-        for chat, (ts, time_str, last_msg) in sorted_chats:
+            time_ts = self._parse_time(msg.get('time', ''))
+            if chat not in chat_last_msg or time_ts > chat_last_msg[chat][0]:
+                chat_last_msg[chat] = (time_ts, msg)
+        
+        # 按时间戳降序排序（最新在最上面）
+        sorted_chats = sorted(chat_last_msg.items(), key=lambda kv: kv[1][0], reverse=True)
+        
+        for chat, (ts, last_msg) in sorted_chats:
             sender = last_msg.get('sender', '')
             content = last_msg.get('content', '')
+            time_str = last_msg.get('time', '')
             count = sum(1 for m in self.all_messages_list if m.get('chat') == chat)
             display_name = self._shorten_name(chat, 18)
             display = f"{time_str}  {display_name}"
             if sender:
                 display += f"  ({sender})"
             display += f"  : {content[:40]}"
+            
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, chat)
-            # 设置 username 用于头像加载
             username = last_msg.get('username', '')
             item.setData(Qt.UserRole + 1, username)
             if last_msg.get('is_urgent'):
@@ -231,7 +235,6 @@ class MainWindow(QMainWindow):
             elif last_msg.get('is_work'):
                 item.setForeground(Qt.darkBlue)
             self.session_list.addItem(item)
-
     def _parse_time(self, time_str):
         import datetime
         if not time_str:
@@ -248,7 +251,17 @@ class MainWindow(QMainWindow):
                 dt = datetime.datetime.strptime(time_str, '%m-%d %H:%M')
                 return dt.replace(year=2026).timestamp()
             except:
-                return 0
+                # 纯时间格式，如 "10:21:56" 或 "10:21"
+                try:
+                    today = datetime.date.today()
+                    parts = time_str.split(':')
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                    second = int(parts[2]) if len(parts) > 2 else 0
+                    dt = datetime.datetime(today.year, today.month, today.day, hour, minute, second)
+                    return dt.timestamp()
+                except:
+                    return 0
 
     def _shorten_name(self, name, max_len):
         return name if len(name) <= max_len else name[:max_len - 2] + '..'
@@ -266,18 +279,30 @@ class MainWindow(QMainWindow):
     # ---------- 消息输入 ----------
     @pyqtSlot(list)
     def add_new_messages(self, messages):
+        # 存入我们自己的数据库（关键新增）
+        from data.storage import save_messages_batch_fast
+        save_messages_batch_fast(messages)   # ← 加这一行        
         today_count = 0
         urgent_count = 0
         for msg in messages:
             self.msg_count += 1
             chat = msg.get('chat', '未知')
             time_str = msg.get('time', '')
+            
+            # 统一用时间戳比较，避免字符串比较的不确定性
+            new_ts = self._parse_time(time_str)
+            
             if chat not in self.session_data:
-                self.session_data[chat] = {'last_msg': msg, 'count': 0}
-            elif time_str >= self.session_data[chat]['last_msg'].get('time', ''):
-                self.session_data[chat]['last_msg'] = msg
+                self.session_data[chat] = {'last_msg': msg, 'count': 0, 'last_ts': new_ts}
+            else:
+                old_ts = self.session_data[chat].get('last_ts', 0)
+                if new_ts >= old_ts:
+                    self.session_data[chat]['last_msg'] = msg
+                    self.session_data[chat]['last_ts'] = new_ts
+            
             self.session_data[chat]['count'] += 1
             self.all_messages_list.append(msg)
+            
             if msg.get('is_urgent'):
                 urgent_count += 1
             if time_str.startswith(time.strftime('%Y-%m-%d')):
@@ -290,7 +315,13 @@ class MainWindow(QMainWindow):
         self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
         if messages:
             self.status_bar.setText(f"最新: {messages[-1].get('content', '')[:40]}...")
-
+                # 临时诊断：查看吴秋辰的最后几条消息及时间戳
+        if any(m.get('chat') == '吴秋辰' for m in messages):
+            qiu_msgs = [m for m in self.all_messages_list if m.get('chat') == '吴秋辰']
+            print("\n===== 诊断：吴秋辰的消息列表（最后5条）=====")
+            for m in qiu_msgs[-5:]:
+                print(f"  时间字符串: {m.get('time')} | 解析后时间戳: {self._parse_time(m.get('time'))}")
+            print("=============================================\n")
     # ---------- 点击会话查看详情 ----------
     def on_session_clicked(self, item):
         chat = item.data(Qt.UserRole)

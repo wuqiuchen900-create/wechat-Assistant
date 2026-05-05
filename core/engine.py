@@ -1,10 +1,9 @@
 # core/engine.py
 from PyQt5.QtCore import QThread, pyqtSignal
-from data.wechat_cli import get_sessions_list, get_history_since, get_unread_messages
+from data.wechat_cli import get_sessions_list, get_history_since, get_unread_messages, get_new_messages
 from data.storage import init_db, save_messages_batch, get_message_count, is_db_initialized, update_sync_progress, get_all_messages
 import time
 from data.storage import save_messages_batch_fast
-
 class MessageEngine(QThread):
     new_messages_signal = pyqtSignal(list)
     urgent_message_signal = pyqtSignal(dict)
@@ -125,29 +124,35 @@ class MessageEngine(QThread):
             if loop_count % 5 == 0:     # ← 新加（每5轮刷新一次关键词）
                 self._reload_keywords() # ← 新加            
             try:
-                # 用未读消息做实时增量
-                unread = get_unread_messages()
+                # 用增量新消息做实时检测
+                unread = get_new_messages()
                 filtered = self._filter_and_tag(unread)
                 
                 new_msgs, urgent_msgs = [], []
                 for msg in filtered:
                     msg_id = self._make_message_id(msg)
-                    if msg_id not in self._known_message_ids:
-                        self._known_message_ids.add(msg_id)
+                    # 从数据库查这个ID是否已存在，避免重复写入
+                    from data.storage import get_conn
+                    conn = get_conn()
+                    exists = conn.execute("SELECT 1 FROM messages WHERE id=?", (msg_id,)).fetchone()
+                    conn.close()
+                    
+                    if not exists:
                         new_msgs.append(msg)
-                        if msg.get('is_urgent'):
-                            urgent_msgs.append(msg)
+                        self._known_message_ids.add(msg_id)
+                    
+                    if msg.get('is_urgent'):
+                        urgent_msgs.append(msg)
                 
                 if new_msgs:
                     save_messages_batch_fast(new_msgs)
-                    self.new_messages_signal.emit(new_msgs)
+                # 无论是否新消息，都发到界面刷新
+                if filtered:
+                    self.new_messages_signal.emit(filtered)
                 for msg in urgent_msgs:
                     self.urgent_message_signal.emit(msg)
                     
             except Exception as e:
                 print(f"[引擎错误] {e}")
-            
-            time.sleep(self._poll_interval)
-
     def stop(self):
         self._running = False

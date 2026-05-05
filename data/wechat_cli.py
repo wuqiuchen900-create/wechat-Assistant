@@ -77,7 +77,27 @@ def get_unread_messages():
                 'is_group': session.get('is_group', False),
                 'username': session.get('username', ''),
             })
-    return messages
+    return messages    
+def get_new_messages():
+    """获取增量新消息（不依赖未读标记，打开微信也能抓）"""
+    data = run_wechat_cli("new-messages")
+    if not isinstance(data, dict):
+        return []
+    messages = data.get('messages', [])
+    if not isinstance(messages, list):
+        return []
+    result = []
+    for msg in messages:
+        result.append({
+            'chat': msg.get('chat', ''),
+            'sender': msg.get('sender', ''),
+            'content': msg.get('last_message', ''),
+            'timestamp': msg.get('timestamp', 0),
+            'time': msg.get('time', ''),
+            'is_group': msg.get('is_group', False),
+            'username': msg.get('username', ''),
+        })
+    return result
 
 
 def _parse_history_text(text):
