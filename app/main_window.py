@@ -4,10 +4,11 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QSplitter, QListWidget, QListWidgetItem,
                              QSizePolicy, QAbstractItemView, QPlainTextEdit,
                              QStyledItemDelegate, QStyle, QButtonGroup, QProgressBar,QStackedWidget)
-from PyQt5.QtCore import Qt, pyqtSlot, QRect, QRectF
-from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPen, QPainterPath, QPixmap
+from PyQt5.QtCore import Qt, pyqtSlot, QRect, QRectF, QPropertyAnimation, QEasingCurve,QTimer
+from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPen, QPainterPath, QPixmap, QRadialGradient
 import time
 import os
+import json
 from data.wechat_cli import get_wechat_data_dir
 import requests
 from data.wechat_cli import get_contact_detail
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # === 左侧导航 ===
+        # ==================== 左侧导航 ====================
         self.nav = QFrame()
         self.nav.setObjectName("sideNav")
         nav_layout = QVBoxLayout(self.nav)
@@ -78,7 +79,8 @@ class MainWindow(QMainWindow):
         for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_settings]:
             nav_layout.addWidget(btn)
         nav_layout.addStretch()
-                # 按钮组：实现导航按钮单选
+
+        # 按钮组：实现导航按钮单选
         self.nav_group = QButtonGroup()
         self.nav_group.addButton(self.btn_realtime)
         self.nav_group.addButton(self.btn_report)
@@ -88,14 +90,14 @@ class MainWindow(QMainWindow):
         self.btn_realtime.clicked.connect(lambda: self._switch_page(0))
         self.btn_report.clicked.connect(lambda: self._switch_page(1))
         self.btn_history.clicked.connect(lambda: self._switch_page(2))
-        self.btn_settings.clicked.connect(self._open_settings)  # 组内按钮互斥
+        self.btn_settings.clicked.connect(self._open_settings)
 
         footer = QLabel("v0.4 · 本地运行")
         footer.setStyleSheet("color: #adb5bd; font-size: 11px; padding: 10px;")
         nav_layout.addWidget(footer)
         main_layout.addWidget(self.nav)
 
-        # === 右侧区域 ===
+        # ==================== 右侧区域 ====================
         right_outer = QVBoxLayout()
         right_outer.setContentsMargins(0, 0, 0, 0)
         right_outer.setSpacing(0)
@@ -128,69 +130,32 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.stats_total)
         stats_layout.addStretch()
 
-        # ---------- 状态栏区域（普通状态）----------
+        # ---------- 微光进度条 ----------
+        self.sync_progress_bar = ShimmerProgressBar()
+        self.sync_progress_bar.hide()                    # 默认隐藏
+
+        # ---------- 状态栏 ----------
         self.status_bar = QLabel("就绪 | 等待新消息...")
         self.status_bar.setObjectName("statusBar")
 
-        # ---------- 进度条区域（同步时显示）----------
-        self.sync_progress_bar = QProgressBar()
-        self.sync_progress_bar.setRange(0, 100)
-        self.sync_progress_bar.setValue(0)
-        self.sync_progress_bar.setTextVisible(False)  # 不显示文字
-        self.sync_progress_bar.setFixedHeight(4)       # 细线高度
-        self.sync_progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                background: transparent;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #6c5ce7, stop:0.5 #a29bfe, stop:1 #6c5ce7);
-                border-radius: 2px;
-            }
-        """)
-
-        # ---------- 用 QStackedWidget 切换显示 ----------
-        self.status_stack = QStackedWidget()
-        self.status_stack.addWidget(self.sync_progress_bar)  # index 0: 进度条
-        self.status_stack.addWidget(self.status_bar)         # index 1: 状态栏
-        self.status_stack.setCurrentIndex(1)                 # 默认显示状态栏
-
-        # ---------- 垂直分割器 ----------
+        # ---------- 垂直分割器（进度条和状态栏各占独立空间）----------
         v_splitter = QSplitter(Qt.Vertical)
-        v_splitter.setHandleWidth(8)
-        v_splitter.addWidget(self.session_list)
-        v_splitter.addWidget(self.stats_panel)
-        v_splitter.addWidget(self.status_stack)      # ← 只加这一个
-        v_splitter.setSizes([380, 80, 30])
-        v_splitter.setStretchFactor(0, 5)
-        v_splitter.setStretchFactor(1, 1)
-        v_splitter.setStretchFactor(2, 0)
-        self.sync_progress_bar.hide()  # 默认隐藏
-
-        # ---------- 垂直分割器 ----------
-        v_splitter = QSplitter(Qt.Vertical)
-        v_splitter.addWidget(self.session_list)       # 0: 消息列表
-        v_splitter.addWidget(self.stats_panel)        # 1: 统计面板
-        v_splitter.addWidget(self.sync_progress_bar)   # 2: 进度条
-        v_splitter.addWidget(self.status_bar)          # 3: 状态栏
-
-        # 四个控件，四个高度值
-        v_splitter.setSizes([350, 80, 20, 30])
-
-        # 拉伸因子
-        v_splitter.setStretchFactor(0, 5)   # 消息列表可拉伸
-        v_splitter.setStretchFactor(1, 1)   # 统计面板微拉伸
-        v_splitter.setStretchFactor(2, 0)   # 进度条固定高度
-        v_splitter.setStretchFactor(3, 0)   # 状态栏固定高度
-
-        # 关键：禁止子控件折叠到0高度
+        v_splitter.setHandleWidth(3)
+        v_splitter.addWidget(self.session_list)           # 0: 消息列表
+        v_splitter.addWidget(self.stats_panel)            # 1: 统计面板
+        v_splitter.addWidget(self.sync_progress_bar)      # 2: 进度条（独立）
+        v_splitter.addWidget(self.status_bar)             # 3: 状态栏（独立）
+        v_splitter.setSizes([370, 80, 6, 30])            # 进度条初始 10px，状态栏 30px
+        v_splitter.setStretchFactor(0, 5)                 # 消息列表可拉伸
+        v_splitter.setStretchFactor(1, 1)                 # 统计面板微拉伸
+        v_splitter.setStretchFactor(2, 0)                 # 进度条固定
+        v_splitter.setStretchFactor(3, 0)                 # 状态栏固定
         v_splitter.setCollapsible(0, False)
         v_splitter.setCollapsible(1, False)
         v_splitter.setCollapsible(2, False)
-        v_splitter.setCollapsible(3, False)        # 状态栏（不自动拉伸）
+        v_splitter.setCollapsible(3, False)
 
-        # ---------- 将垂直分割器放入左侧消息容器 ----------
+        # ---------- 将分割器放入消息容器 ----------
         self.msg_container = QWidget()
         msg_layout = QVBoxLayout(self.msg_container)
         msg_layout.setContentsMargins(0, 0, 0, 0)
@@ -221,7 +186,7 @@ class MainWindow(QMainWindow):
 
         h_splitter.addWidget(self.detail_panel)
         h_splitter.setSizes([400, 400])
-        # 设置页面（默认隐藏）
+
         right_outer.addWidget(h_splitter)
         main_layout.addLayout(right_outer)
 
@@ -229,7 +194,9 @@ class MainWindow(QMainWindow):
         self.session_data = {}
         self.all_messages_list = []
         self.msg_count = 0
-
+        # 界面快照文件路径（用于启动秒开，不需全量刷新）
+        self._snapshot_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'message_data', 'snapshot.json')
+        self._sync_in_progress = False   # ← 加这行
         # ========== 头像相关初始化 ==========
         self.avatar_cache = {}
         self.wx_data_dir, self.wxid = get_wechat_data_dir()
@@ -240,7 +207,7 @@ class MainWindow(QMainWindow):
         else:
             self.avatar_dir = None
 
-        # 设置头像委托（必须在 avatar_cache 和 avatar_dir 之后）
+        # 设置头像委托
         self.avatar_delegate = AvatarDelegate(self.avatar_cache, self.avatar_dir)
         self.session_list.setItemDelegate(self.avatar_delegate)
 
@@ -336,6 +303,11 @@ class MainWindow(QMainWindow):
     # ---------- 消息输入 ----------
     @pyqtSlot(list)
     def add_new_messages(self, messages):
+        # 节流：每2秒最多刷新一次界面
+        if not hasattr(self, '_last_ui_refresh'):
+            self._last_ui_refresh = 0
+        need_refresh = (time.time() - self._last_ui_refresh) > 2.0
+
         # 存入我们自己的数据库（关键新增）
         from data.storage import save_messages_batch_fast
         save_messages_batch_fast(messages)   # ← 加这一行        
@@ -364,15 +336,18 @@ class MainWindow(QMainWindow):
                 urgent_count += 1
             if time_str.startswith(time.strftime('%Y-%m-%d')):
                 today_count += 1
-
-        self._update_session_list()
         self.stats_today.setText(f"📊 今日: {today_count} 条")
         self.stats_active.setText(f"💬 活跃会话: {len(self.session_data)} 个")
         self.stats_urgent.setText(f"🔴 紧急: {urgent_count} 条")
         self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
-        if messages:
+        from data.storage import get_message_count
+        if messages and not self._sync_in_progress:
             self.status_bar.setText(f"最新: {messages[-1].get('content', '')[:40]}...")
-    # ---------- 点击会话查看详情 ----------
+        # 只在需要时才刷新界面
+        if need_refresh:
+            self._update_session_list()
+            self._last_ui_refresh = time.time() 
+    # ---------- 点击会话查看详情 ----------   
     def on_session_clicked(self, item):
         chat = item.data(Qt.UserRole)
         msgs = [m for m in self.all_messages_list if m.get('chat') == chat]
@@ -404,41 +379,79 @@ class MainWindow(QMainWindow):
         self.stats_urgent.setText("🔴 紧急: 0 条")
         self.stats_total.setText("📦 缓存: 0 条")
         self.status_bar.setText("列表已清空 | 等待新消息...")
+    def save_snapshot(self):
+        """关闭时保存界面快照"""
+        snapshot = []
+        for i in range(self.session_list.count()):
+            item = self.session_list.item(i)
+            if item:
+                snapshot.append({
+                    'text': item.text(),
+                    'chat': item.data(Qt.UserRole),
+                    'username': item.data(Qt.UserRole + 1) or '',
+                    'scroll_pos': self.session_list.verticalScrollBar().value()
+                })
+        if snapshot:
+            os.makedirs(os.path.dirname(self._snapshot_file), exist_ok=True)
+            with open(self._snapshot_file, 'w', encoding='utf-8') as f:
+                json.dump(snapshot, f, ensure_ascii=False)
+
+    def restore_snapshot(self):
+        """启动时恢复界面快照（秒开）"""
+        if not os.path.exists(self._snapshot_file):
+            return False
+        
+        try:
+            with open(self._snapshot_file, 'r', encoding='utf-8') as f:
+                snapshot = json.load(f)
+            if not snapshot:
+                return False
+            
+            scroll_pos = 0
+            for item_data in snapshot:
+                text = item_data.get('text', '')
+                chat = item_data.get('chat', '')
+                username = item_data.get('username', '')
+                scroll_pos = item_data.get('scroll_pos', 0)
+                
+                item = QListWidgetItem(text)
+                item.setData(Qt.UserRole, chat)
+                item.setData(Qt.UserRole + 1, username)
+                self.session_list.addItem(item)
+            
+            # 恢复滚动位置
+            self.session_list.verticalScrollBar().setValue(scroll_pos)
+            return True
+        except:
+            return False
+
+    def closeEvent(self, event):
+        """关闭窗口时保存界面快照"""
+        self.save_snapshot()
+        super().closeEvent(event)
+
     def _load_avatars(self):
-        """通过 contacts 命令建立 username ↔ 数字ID 的映射，再匹配本地头像文件"""
         if not self.avatar_dir:
             return
-        
-        # 收集所有唯一的 username
+
         usernames = set()
         for msg in self.all_messages_list:
             u = msg.get('username', '')
-            if u:
+            if u and u not in self.avatar_cache:
                 usernames.add(u)
-        
-        # 逐个获取联系人详情，匹配本地头像文件
-        for username in usernames:
-            if username in self.avatar_cache:
-                continue
-            
-            try:
-                detail = get_contact_detail(username)
-                if detail:
-                    matched_pixmap = self._find_local_avatar(username)
-                    if matched_pixmap:
-                        self.avatar_cache[username] = matched_pixmap
-                    else:
-                        self.avatar_cache[username] = None
-                else:
-                    self.avatar_cache[username] = None
-            except:
-                self.avatar_cache[username] = None
-        
-        self._update_session_list()
-                # 让界面及时响应，避免假死
-        from PyQt5.QtWidgets import QApplication
-        QApplication.processEvents()
 
+        if not usernames:
+            return
+
+        # 使用独立线程加载头像，不阻塞主界面
+        from core.avatar_loader import AvatarLoader
+        self._avatar_loader = AvatarLoader(self.avatar_cache, self.avatar_dir, usernames)
+        self._avatar_loader.avatar_ready.connect(self._on_avatars_ready)
+        self._avatar_loader.start()
+
+    def _on_avatars_ready(self, result):
+        """头像加载完成，刷新列表"""
+        self._update_session_list()
     def _find_local_avatar(self, username):
         """在本地头像目录中查找匹配的头像文件"""
         if not self.avatar_dir:
@@ -461,57 +474,48 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, int)
     def update_sync_progress(self, current, total):
-        if total == -1:
-            # 百分比模式：切换到进度条，更新百分比
-            self.status_stack.setCurrentIndex(0)
-            self.sync_progress_bar.setValue(current)
-        elif total > 0:
-            # 数字模式（兼容老逻辑）
-            self.status_stack.setCurrentIndex(0)
-            percent = int(current / total * 100)
-            self.sync_progress_bar.setValue(percent)
-        # 不需要 show()，QStackedWidget 已经完成了显示切换
+        if current == -2 and total == -2:
+            # 快照恢复模式
+            self.restore_snapshot()
+            self.status_bar.setText("就绪 (已恢复快照)")
+            return
+        if current == -1 and total == -1:
+            self.status_bar.setText("正在同步历史消息...")
+            self.sync_progress_bar.show()
+        else:
+            self._sync_in_progress = True
+            self.sync_progress_bar.show()
+            if total == -1:
+                self.status_bar.setText(f"正在同步历史消息... {current}%")
+            elif total > 0:
+                percent = int(current / total * 100)
+                self.status_bar.setText(f"正在同步历史消息... {percent}%")
 
     @pyqtSlot()
     def on_sync_finished(self):
-        # 切换回状态栏
-        self.status_stack.setCurrentIndex(1)
+        # 1. 立即标记结束并更新界面，让程序"活"过来
+        self._sync_in_progress = False
+        self.sync_progress_bar.hide()
         from data.storage import get_message_count
-        self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")
-        # ... 后面的头像加载代码可选择性保留
+        self.status_bar.setText(f"就绪 | 清理并准备加载头像...")
+        
+        # 强制处理积压的事件，确保界面立即刷新
+        QApplication.processEvents()
 
-        # 收集所有唯一的 username
-        usernames = set()
-        for msg in self.all_messages_list:
-            u = msg.get('username', '')
-            if u:
-                usernames.add(u)
+        # 2. 分步延迟执行，避免主线程阻塞
+        QTimer.singleShot(200, self._update_session_list)
+        QTimer.singleShot(500, self._load_avatars)
 
-        # 逐个获取头像 URL 并下载
-        for username in usernames:
-            if username in self.avatar_cache:
-                continue
-            try:
-                detail = get_contact_detail(username)
-                if detail and detail.get('avatar'):
-                    avatar_url = detail['avatar']
-                    resp = requests.get(avatar_url, timeout=5)
-                    if resp.status_code == 200:
-                        pixmap = QPixmap()
-                        pixmap.loadFromData(resp.content)
-                        # 缩放成头像尺寸
-                        pixmap = pixmap.scaled(36, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        self.avatar_cache[username] = pixmap
-                    else:
-                        self.avatar_cache[username] = None
-                else:
-                    self.avatar_cache[username] = None
-            except:
-                self.avatar_cache[username] = None
+        # 再过 1 秒更新状态栏并保存快照
+        QTimer.singleShot(1000, self._on_sync_cleanup)
 
-        # 刷新会话列表（这时头像已就位）
+    def _on_sync_cleanup(self):
+        """同步完成后的更新状态栏并保存快照"""
+        from data.storage import get_message_count
+
         self._update_session_list()
         self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")
+        self.save_snapshot()
 
 
 # ---------- 头像委托类 ----------
@@ -577,3 +581,73 @@ class AvatarDelegate(QStyledItemDelegate):
                           option.rect.height())
         painter.setPen(QPen(QColor("#333333")))
         painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, index.data(Qt.DisplayRole))
+# ---------- 微光进度条 ----------
+from PyQt5.QtCore import pyqtProperty
+
+class ShimmerProgressBar(QProgressBar):
+    """一道细长的、从左向右滑过的微光"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRange(0, 0) 
+        self.setTextVisible(False)
+        self.setFixedHeight(4)
+        self._shimmer_pos = 0.0
+
+        # 设置背景样式
+        self.setStyleSheet("""
+            QProgressBar {
+                background-color: #f0f0f5;
+                border: none;
+                border-radius: 3px;
+            }
+            QProgressBar::chunk {
+                background: transparent;
+            }
+        """)
+
+        # 创建并启动动画，让光持续移动
+        self._anim = QPropertyAnimation(self, b"shimmerPos")
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setDuration(1500)
+        self._anim.setLoopCount(-1)
+        self._anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._anim.start()
+
+    # ↓↓↓ 关键：定义 Qt 属性，让动画能驱动它 ↓↓↓
+    @pyqtProperty(float)
+    def shimmerPos(self):
+        return self._shimmer_pos
+
+    @shimmerPos.setter
+    def shimmerPos(self, value):
+        self._shimmer_pos = value
+        self.update()  # 触发重绘
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        bar_width = self.width()
+        bar_height = self.height()
+
+        shimmer_width = 800
+
+        x_start = self._shimmer_pos * (bar_width + shimmer_width) - shimmer_width
+        x_end = x_start + shimmer_width
+
+        center_x = (x_start + x_end) / 2
+        center_y = bar_height / 2
+        gradient = QRadialGradient(center_x, center_y, shimmer_width / 1.5)
+
+        core_color = QColor(218, 165, 32, 150)
+        edge_color = QColor(218, 165, 32, 0)
+        gradient.setColorAt(0.0, core_color)
+        gradient.setColorAt(1.0, edge_color)
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(QRectF(x_start, 0, shimmer_width, bar_height))
+        painter.end()
