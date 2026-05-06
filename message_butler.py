@@ -5,7 +5,6 @@ import os
 import time
 from datetime import datetime
 from plyer import notification
-
 # ====== 配置区 ======
 
 # 黑名单：这些会话的消息直接忽略
@@ -32,9 +31,9 @@ URGENT_KEYWORDS = [
 # 轮询间隔（秒）
 POLL_INTERVAL = 10  # 5分钟
 
-# 数据存放目录
-DATA_DIR = r"D:\wechat_assistant\message_data"
-REPORT_DIR = r"D:\wechat_assistant\reports"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, 'message_data')
+REPORT_DIR = os.path.join(BASE_DIR, 'reports')
 
 
 # ====== 初始化目录 ======
@@ -50,7 +49,7 @@ def run_new_messages():
             "wechat-cli unread",
             capture_output=True,
             text=True,
-            shell=True,
+            shell=False,
             encoding='utf-8',      # 强制 UTF-8
             errors='replace',      # 万一有极端字符，用 � 替代，不崩溃
             timeout=30

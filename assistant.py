@@ -731,7 +731,10 @@ def render_dashboard(pending, urgent, high, normal, done_today, infos, rules):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>私人信息助理</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
+                 "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+}
 <style>
 :root {{
     --bg: #0f0f13;
@@ -750,11 +753,8 @@ def render_dashboard(pending, urgent, high, normal, done_today, infos, rules):
 }}
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{
-    font-family: 'Noto Sans SC', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-}}
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
+                 "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;}}
 .header {{
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     padding: 24px 32px;

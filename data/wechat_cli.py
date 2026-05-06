@@ -42,7 +42,7 @@ def run_wechat_cli(command):
             full_cmd,
             capture_output=True,
             text=True,
-            shell=True,
+            shell=False,
             timeout=30,
             env=env,
             encoding='utf-8',
@@ -101,6 +101,15 @@ def get_new_messages():
 
 
 def _parse_history_text(text):
+    # 先检查是不是语音消息（严格检测：以 <msg> 开头且包含 voicelength）
+    if text.strip().startswith('<msg>') and 'voicelength' in text:
+        import re as _re
+        match = _re.search(r'voicelength="(\d+)"', text)
+        duration = int(match.group(1)) // 1000 if match else 0
+        label = f"[语音 {duration}秒]" if duration > 0 else "[语音]"
+        return {'time': '', 'sender': '', 'content': label}
+    
+    # 原有正则匹配逻辑：[时间] 发送者: 内容
     match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
     if match:
         return {
@@ -108,8 +117,9 @@ def _parse_history_text(text):
             'sender': match.group(2),
             'content': match.group(3)
         }
+    
+    # 如果都没匹配到，返回 None
     return None
-
 
 def get_sessions_list(limit=200):
     global _sessions_cache, _sessions_cache_time

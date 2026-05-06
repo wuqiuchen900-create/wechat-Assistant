@@ -3,7 +3,8 @@ import sys
 import os
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
-
+import logging
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 # 确保项目根目录在 sys.path 中，方便导入自定义模块
 sys.path.insert(0, os.path.dirname(__file__))
 

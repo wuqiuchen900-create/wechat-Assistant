@@ -10,12 +10,10 @@ import time
 import os
 import json
 from data.wechat_cli import get_wechat_data_dir
-import requests
 from data.wechat_cli import get_contact_detail
 from app.settings_page import SettingsPage
 from PyQt5.QtWidgets import QApplication
 from debug_log import logger
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -204,8 +202,12 @@ class MainWindow(QMainWindow):
         self.avatar_cache = {}
         self.wx_data_dir, self.wxid = get_wechat_data_dir()
         if self.wx_data_dir:
-            self.avatar_dir = os.path.join(self.wx_data_dir, 'FileStorage', 'General', 'HDHeadImage')
-            if not os.path.exists(self.avatar_dir):
+            head_imgs = os.path.join(
+                os.path.dirname(self.wx_data_dir), 'all_users', 'head_imgs'
+            )
+            if os.path.exists(head_imgs):
+                self.avatar_dir = head_imgs
+            else:
                 self.avatar_dir = None
         else:
             self.avatar_dir = None
@@ -308,12 +310,12 @@ class MainWindow(QMainWindow):
                 dt = datetime.datetime.strptime(time_str[:16], '%Y-%m-%d %H:%M')
             else:
                 dt = datetime.datetime.strptime(time_str, '%m-%d %H:%M')
-                dt = dt.replace(year=2026)
+                dt = dt.replace(year=datetime.date.today().year)
             return dt.timestamp()
         except:
             try:
                 dt = datetime.datetime.strptime(time_str, '%m-%d %H:%M')
-                return dt.replace(year=2026).timestamp()
+                return dt.replace(year=datetime.datetime.now().year).timestamp()
             except:
                 # 纯时间格式，如 "10:21:56" 或 "10:21"
                 try:
@@ -551,7 +553,7 @@ class MainWindow(QMainWindow):
             u = msg.get('username', '')
             if u and u not in self.avatar_cache:
                 usernames.add(u)
-
+        logger.info(f"[头像加载] 收集到 {len(usernames)} 个待加载头像")
         if not usernames:
             return
 
@@ -564,26 +566,8 @@ class MainWindow(QMainWindow):
     def _on_avatars_ready(self, result):
         """头像加载完成，刷新列表"""
         self._update_session_list()
-    def _find_local_avatar(self, username):
-        """在本地头像目录中查找匹配的头像文件"""
-        if not self.avatar_dir:
-            return None
-        
-        # 微信4.x头像存放在 all_users/head_imgs/ 下，文件名为数字ID
-        head_imgs_dir = os.path.join(os.path.dirname(self.avatar_dir), 'head_imgs')
-        if not os.path.exists(head_imgs_dir):
-            return None
-        
-        # 遍历 head_imgs 下的所有文件
-        for root, dirs, files in os.walk(head_imgs_dir):
-            for filename in files:
-                if username in filename:
-                    filepath = os.path.join(root, filename)
-                    pixmap = QPixmap(filepath)
-                    if not pixmap.isNull():
-                        return pixmap.scaled(36, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        return None        
-
+        # 1 秒后再刷新一次，确保所有头像都加载完毕
+        QTimer.singleShot(1000, self._update_session_list)
     @pyqtSlot(int, int)
     def update_sync_progress(self, current, total):
         if current == -2 and total == -2:
@@ -624,11 +608,23 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self._on_sync_cleanup)
 
     def _on_sync_cleanup(self):
-        """同步完成后的清理工作，只更新统计，不重复重建列表"""
+        """同步完成后的清理工作：如果内存为空则从数据库加载，否则只更新统计"""
+
+        # 首次全量同步后，内存里已经有分批写入时追加的消息了
+        # 但为了确保完整性，如果内存消息数量明显少于数据库，就重新加载
         from data.storage import get_message_count
+        db_count = get_message_count()
         
-        # 直接取当前内存中最精确的计数，不再从数据库重建
-        self.msg_count = len(self.all_messages_list)
+        if db_count > 0 and len(self.all_messages_list) < db_count * 0.8:
+            # 内存消息少于数据库的 80%，说明有遗漏，重新加载
+            logger.info(f"[同步后清理] 内存({len(self.all_messages_list)})与数据库({db_count})差异较大，重新加载")
+            self._load_cached_messages()
+        elif not self.all_messages_list:
+            # 内存完全为空，加载
+            self._load_cached_messages()
+        else:
+            # 内存数据足够，只更新统计
+            self.msg_count = len(self.all_messages_list)
         
         self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
         self.status_bar.setText(f"就绪 | 缓存消息: {self.msg_count} 条")
@@ -641,7 +637,6 @@ class AvatarDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.avatar_cache = avatar_cache
         self.avatar_dir = avatar_dir
-
     def paint(self, painter, option, index):
         if option.state & QStyle.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
@@ -665,8 +660,8 @@ class AvatarDelegate(QStyledItemDelegate):
             # 缓存未命中，尝试从本地文件加载
             else:
                 # 直接使用已知的绝对路径
-                head_imgs_dir = r"D:\xwechat_files\all_users\head_imgs"
-                if os.path.exists(head_imgs_dir):
+                head_imgs_dir = self.avatar_dir
+                if head_imgs_dir and os.path.exists(head_imgs_dir):
                     for root, dirs, files in os.walk(head_imgs_dir):
                         for filename in files:
                             if filename.endswith(('.jpg', '.png')) and username in filename:
