@@ -136,7 +136,7 @@ class SyncWorker(QObject):
         """拉取单个会话的历史消息（在子线程中执行）"""
         from data.wechat_cli import run_wechat_cli, _parse_history_text
 
-        cmd = f'history "{chat_name}" --limit 300'
+        cmd = f'history "{chat_name}" --limit 50000'
         data = run_wechat_cli(cmd)
         if not isinstance(data, dict):
             return []

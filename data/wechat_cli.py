@@ -123,7 +123,7 @@ def get_sessions_list(limit=200):
     return _sessions_cache
 
 
-def get_history_since(chat_name, start_time=None, limit=50):
+def get_history_since(chat_name, start_time=None, limit=5000):
     cmd = f'history "{chat_name}" --limit {limit}'
     if start_time:
         cmd += f' --start-time "{start_time}"'
