@@ -1,0 +1,7 @@
+del /s /q D:\wechat-Assistant\__pycache__
+del /s /q D:\wechat-Assistant\app\__pycache__
+del /s /q D:\wechat-Assistant\core\__pycache__
+del /s /q D:\wechat-Assistant\data\__pycache__
+del D:\wechat-Assistant\message_data\cache.db
+del D:\wechat-Assistant\message_data\snapshot.json
+python main.py
