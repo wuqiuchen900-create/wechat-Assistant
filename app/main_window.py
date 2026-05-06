@@ -329,6 +329,9 @@ class MainWindow(QMainWindow):
 
     def _shorten_name(self, name, max_len):
         return name if len(name) <= max_len else name[:max_len - 2] + '..'
+    def _make_message_id(self, msg):
+        """生成消息唯一 ID（与 engine 中的规则保持一致）"""
+        return f"{msg.get('chat','')}|{msg.get('sender','')}|{msg.get('time','')}|{msg.get('content','')[:30]}"    
     def _switch_page(self, index):
         for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_settings]:
             btn.setChecked(False)
@@ -350,17 +353,20 @@ class MainWindow(QMainWindow):
     # ---------- 消息输入 ----------
     @pyqtSlot(list)
     def add_new_messages(self, messages):
-        # 节流：每2秒最多刷新一次界面
+        # 构建已有消息 ID 集合（只做一次，避免每次循环都重建）
+        existing_ids = {self._make_message_id(m) for m in self.all_messages_list}
+        # 补上计数变量
+        today_count = 0
+        urgent_count = 0
+        # 补上刷新节流
         if not hasattr(self, '_last_ui_refresh'):
             self._last_ui_refresh = 0
         need_refresh = (time.time() - self._last_ui_refresh) > 2.0
-
-        # 存入我们自己的数据库（关键新增）
-        from data.storage import save_messages_batch_fast
-        save_messages_batch_fast(messages)   # ← 加这一行        
-        today_count = 0
-        urgent_count = 0
-        for msg in messages:
+        for msg in messages:        ##循环拉取消息
+            mid = self._make_message_id(msg)
+            if mid in existing_ids:
+                continue  # 跳过已经在内存里的重复消息
+            existing_ids.add(mid)
             self.msg_count += 1
             chat = msg.get('chat', '未知')
             time_str = msg.get('time', '')
@@ -390,10 +396,11 @@ class MainWindow(QMainWindow):
         from data.storage import get_message_count
         if messages and not self._sync_in_progress:
             self.status_bar.setText(f"最新: {messages[-1].get('content', '')[:40]}...")
-        # 只在需要时才刷新界面
+        # 有新消息到达时，局部刷新有变化的会话，它们会自动跳到列表顶部
         if need_refresh:
-            self._update_session_list()
-            self._last_ui_refresh = time.time() 
+            changed = {m.get('chat') for m in messages if m.get('chat')}
+            self._refresh_changed_sessions(changed)
+            self._last_ui_refresh = time.time()
     # ---------- 点击会话查看详情 ----------   
     def on_session_clicked(self, item):
         chat = item.data(Qt.UserRole)
@@ -410,6 +417,18 @@ class MainWindow(QMainWindow):
                 line = f"🔴 {line}"
             text += line + "\n"
         self.detail_content.setPlainText(text or "暂无消息")
+
+        # ===== 新增：更新左侧列表该条目的显示时间并移到顶部 =====
+        if msgs:
+            latest = msgs[-1]  # 排序后最后一个是最新
+            time_str = latest.get('time', '')
+            sender = latest.get('sender', '')
+            content = latest.get('content', '')
+            display = f"{time_str}  {self._shorten_name(chat, 18)}"
+            if sender:
+                display += f"  ({sender})"
+            display += f"  : {content[:40]}"
+            item.setText(display)
     def _refresh_blacklist_cache(self):
         """刷新黑名单缓存"""
         from data.storage import get_all_blacklist
@@ -472,15 +491,23 @@ class MainWindow(QMainWindow):
         except:
             return False
     def _load_cached_messages(self):
-        """从数据库静默加载历史消息到内存，不刷新界面"""
+        """启动时从数据库全量重建内存数据，唯一真相来源是 cache.db"""
         from data.storage import get_message_count, get_all_messages
-
+        
+        # 1. 完全清空内存
+        self.all_messages_list.clear()
+        self.session_data.clear()
+        self.msg_count = 0
+        
         total = get_message_count()
         if total == 0:
             return
-
-        page_size = 200   # 每次读 200 条，避免界面长时间冻结
+            
+        logger.info(f"[快照恢复] 正在从数据库加载 {total} 条消息...")
+        
+        page_size = 500
         offset = 0
+        logger.info(f"[内存重建] 开始加载，当前内存总量: {self.msg_count}")
         while offset < total:
             batch = get_all_messages(limit=page_size, offset=offset)
             if not batch:
@@ -500,20 +527,16 @@ class MainWindow(QMainWindow):
                 self.session_data[chat]['count'] += 1
                 self.msg_count += 1
             offset += page_size
-            # 允许 UI 呼吸一下
             QApplication.processEvents()
-
-        # 更新统计面板
-        from data.storage import get_message_count
-        self.stats_total.setText(f"📦 缓存: {get_message_count()} 条")
-        today_count = sum(
-            1 for m in self.all_messages_list
-            if m.get('time', '').startswith(time.strftime('%Y-%m-%d'))
-        )
+        logger.info(f"[内存重建] 加载完成，当前内存总量: {self.msg_count}")
+        # 2. 内存重建完毕后，精确更新所有面板
+        self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
+        today_count = sum(1 for m in self.all_messages_list if m.get('time', '').startswith(time.strftime('%Y-%m-%d')))
         urgent_count = sum(1 for m in self.all_messages_list if m.get('is_urgent'))
         self.stats_today.setText(f"📊 今日: {today_count} 条")
         self.stats_active.setText(f"💬 活跃会话: {len(self.session_data)} 个")
         self.stats_urgent.setText(f"🔴 紧急: {urgent_count} 条")
+        logger.info(f"[快照恢复] 内存重建完成，共 {self.msg_count} 条消息")
     def closeEvent(self, event):
         """关闭窗口时保存界面快照"""
         self.save_snapshot()
@@ -565,7 +588,7 @@ class MainWindow(QMainWindow):
     def update_sync_progress(self, current, total):
         if current == -2 and total == -2:
             self.restore_snapshot()
-            self.status_bar.setText("就绪 (正在加载历史数据...)")
+            self.status_bar.setText("就绪 | 正在从数据库重建内存...)")
             QTimer.singleShot(50, self._load_cached_messages)  # 稍微延迟，让快照先显示
             return
         if current == -1 and total == -1:
@@ -601,12 +624,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self._on_sync_cleanup)
 
     def _on_sync_cleanup(self):
-        """同步完成后的更新状态栏并保存快照"""
+        """同步完成后的清理工作，只更新统计，不重复重建列表"""
         from data.storage import get_message_count
-        self._update_session_list()
-        self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")
+        
+        # 直接取当前内存中最精确的计数，不再从数据库重建
+        self.msg_count = len(self.all_messages_list)
+        
+        self.stats_total.setText(f"📦 缓存: {self.msg_count} 条")
+        self.status_bar.setText(f"就绪 | 缓存消息: {self.msg_count} 条")
         self.save_snapshot()
-
+        logger.info(f"[同步后清理] 当前内存消息总数: {self.msg_count}")
 
 # ---------- 头像委托类 ----------
 class AvatarDelegate(QStyledItemDelegate):

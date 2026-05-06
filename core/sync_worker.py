@@ -6,7 +6,7 @@ from data.wechat_cli import get_sessions_list, get_history_since
 from data.storage import get_conn, save_messages_batch_with_conn, update_sync_progress, get_last_sync_time
 from debug_log import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from datetime import datetime as dt, timedelta
 def _normalize_time(time_str):
     """
     把微信返回的各种时间格式统一转成 '2026-05-05 21:38' 标准格式
@@ -59,6 +59,7 @@ class SyncWorker(QObject):
 
     def __init__(self):
         super().__init__()
+        self.silent_mode = True   # 全量同步时不发送消息信号
         self.changed_chats = set()  # 收集本次同步有变化的会话
         self._running = True
         self.finished_callback = None
@@ -89,36 +90,33 @@ class SyncWorker(QObject):
                     break
                 completed += 1
                 msgs = future.result()
-                if msgs:
-                    # 【补上】写入同步进度，否则下次启动无法识别已完成初始化
-                    last_msg_time = msgs[-1].get('time', '')
+                if msgs: 
+                    last_msg_time = msgs[0].get('time', '')
                     normalized_time = _normalize_time(last_msg_time)
                     try:
                         dt = datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M')
                         last_ts = int(dt.timestamp())
                     except:
                         last_ts = 0
-                    update_sync_progress(chat_name, normalized_time, last_ts)
+                    sync_chat_name = msgs[0].get('chat', '')
+                    update_sync_progress(sync_chat_name,normalized_time,last_ts)
                     # 写入数据库
                     db_conn = get_conn()
                     save_messages_batch_with_conn(db_conn, msgs)
                     db_conn.close()
                     # 发送消息信号
-                    self.messages_ready.emit(msgs)
+                    if not self.silent_mode:
+                        self.messages_ready.emit(msgs)
                     
                     # 【关键】写入该会话最后一条消息的时间，用于增量同步
-                    last_msg_time = msgs[-1].get('time', '')
+                    last_msg_time = msgs[0].get('time', '')
                     normalized_time = _normalize_time(last_msg_time)
                     try:
                         dt = datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M')
                         last_ts = int(dt.timestamp())
                     except:
                         last_ts = 0
-                    update_sync_progress(
-                        chat_name,
-                        normalized_time,
-                        last_ts
-                    )
+                    update_sync_progress(sync_chat_name,normalized_time,last_ts)
                                 # 每完成 20% 或最后一个时打印一次进度
                 if completed == 1 or completed == total or completed % max(1, total // 5) == 0:
                     percent = int(completed / total * 100)
@@ -192,9 +190,20 @@ class IncrementalSyncWorker(QObject):
 
             # 从数据库获取上次同步时间
             last_time = get_last_sync_time(chat_name)
-
-            # 只拉取该时间之后的新消息
-            msgs = get_history_since(chat_name, start_time=last_time, limit=50)
+            # === 新增：先筛选，再同步 ===
+            # sessions 列表自带该会话最后一条消息的时间
+            session_last_msg_time = session.get('time', '')
+            if last_time and session_last_msg_time:
+                # 如果微信端的最后消息时间不晚于我们记录的时间，跳过
+                if session_last_msg_time <= last_time:
+                    continue  # 没有新消息，不调 wechat-cli         
+            time_after = None
+            if last_time:
+                try:
+                    time_after = (dt.strptime(last_time, '%Y-%m-%d %H:%M') + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M')
+                except:
+                    time_after = last_time
+            msgs = get_history_since(chat_name, start_time=time_after)
             if not msgs:
                 continue
 
@@ -209,20 +218,24 @@ class IncrementalSyncWorker(QObject):
 
             # 更新同步进度
             if msgs:
-                last_msg_time = msgs[-1].get('time', '')
+                logger.info(f"[IncWorker·拉取] {chat_name}: +{len(msgs)}条, "
+                f"首条时间={msgs[0].get('time','?')}, "
+                f"末条时间={msgs[-1].get('time','?')}, "
+                f"传入的last_time={last_time}")
+                last_msg_time = msgs[0].get('time', '')
                 normalized_time = _normalize_time(last_msg_time)
                 try:
                     dt = datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M')
                     last_ts = int(dt.timestamp())
                 except:
                     last_ts = 0
-                update_sync_progress(chat_name, normalized_time, last_ts)
+                sync_chat_name = msgs[0].get('chat', '')
+                update_sync_progress(sync_chat_name,normalized_time,last_ts)
             self.changed_chats.add(chat_name)
             completed = i + 1
             if completed == 1 or completed == total or completed % max(1, total // 5) == 0:
                 percent = int(completed / total * 100)
                 logger.info(f"[IncWorker] 进度 {completed}/{total} ({percent}%)")
-            self.changed_chats.add(chat_name)   
             self.progress_signal.emit(i + 1, total)
             self.messages_ready.emit(msgs)
             time.sleep(0.1)
