@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSlot, QTimer
 from app.reminder_popup import ReminderPopup
 from app.main_window import MainWindow
 from core.engine import MessageEngine
-
+from debug_log import logger
 
 class WeChatAssistantTray(QSystemTrayIcon):
     def __init__(self):
@@ -26,16 +26,18 @@ class WeChatAssistantTray(QSystemTrayIcon):
         # 消息引擎
         self.engine = MessageEngine()
         self.engine.configure()
-        # 连接信号
-        self.engine.new_messages_signal.connect(self.main_window.add_new_messages)
-        self.engine.urgent_message_signal.connect(self.on_urgent_message)
-        # 启动引擎
+        logger.info("[托盘] 开始连接信号...")
+        self.engine.start()   # 启动消息引擎线程
+        logger.info("[托盘] 引擎线程已启动")# 连接引擎信号到主窗口
+        # 重新加上 sync_progress_signal 的连接，用于接收 (-2,-2) 和 (-1,-1) 特殊信号
         self.engine.sync_progress_signal.connect(self.main_window.update_sync_progress)
         self.engine.sync_finished_signal.connect(self.main_window.on_sync_finished)
-        self.engine.start()
-        
-        # 延迟连接 SyncWorker 的进度信号到主窗口，确保 SyncWorker 已创建
-        QTimer.singleShot(1000, self._connect_sync_progress)
+        self.engine.new_messages_signal.connect(self.main_window.add_new_messages)        # ✅ 改成 add_new_messages
+        # 下面两行直接删掉，它们根本没有对应的信号和槽
+        # self.engine.snapshot_ready_signal.connect(self.main_window.load_snapshot_view)
+        # self.engine.batch_messages_signal.connect(self.main_window.load_batch_view)
+        self.engine.sync_worker_ready.connect(self._on_sync_worker_ready)
+        logger.info("[托盘] 信号连接完成，启动引擎")
 
         # 右键菜单（只创建一次）
         self.menu = QMenu()
@@ -51,14 +53,10 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.setContextMenu(self.menu)
         self.activated.connect(self.on_tray_activated)
 
-    def _connect_sync_progress(self):
-        if hasattr(self.engine, '_sync_worker'):
-            self.engine._sync_worker.progress_signal.connect(self.main_window.update_sync_progress)
-            self.engine._sync_worker.finished_signal.connect(self.main_window.on_sync_finished)
-            print("[tray] 成功连接 SyncWorker 信号到主窗口")
-        else:
-            print("[tray] 1秒后仍未找到 _sync_worker，再等1秒")
-            QTimer.singleShot(500, self._connect_sync_progress)
+    def _on_sync_worker_ready(self, worker):
+        logger.info("[托盘] 收到 sync_worker_ready，连接 worker 进度信号")
+        #"""同步工作器创建好了，把它的进度信号连到进度条"""
+        worker.progress_signal.connect(self.main_window.update_sync_progress)
     
     def show_main_window(self):
         self.main_window.show()

@@ -4,7 +4,8 @@ import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 from data.wechat_cli import get_sessions_list, get_history_since
 from data.storage import get_conn, save_messages_batch_with_conn, update_sync_progress, get_last_sync_time
-
+from debug_log import logger
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def _normalize_time(time_str):
     """
@@ -28,7 +29,6 @@ def _normalize_time(time_str):
         return dt.strftime('%Y-%m-%d %H:%M')
     except:
         pass
-
     # 只有时间（如 '21:52:19' 或 '21:52'）
     try:
         now = datetime.datetime.now()
@@ -59,17 +59,16 @@ class SyncWorker(QObject):
 
     def __init__(self):
         super().__init__()
+        self.changed_chats = set()  # 收集本次同步有变化的会话
         self._running = True
-
+        self.finished_callback = None
     def stop(self):
         self._running = False
 
     def do_full_sync(self):
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
         sessions = get_sessions_list(limit=500)
         total = len(sessions)
-
+        logger.info(f"[SyncWorker] 开始全量同步，共 {total} 个会话")
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {}
             for session in sessions:
@@ -91,8 +90,6 @@ class SyncWorker(QObject):
                 completed += 1
                 msgs = future.result()
                 if msgs:
-                     # 【加这行日志】打印每个会话实际拉取的消息数量
-                    print(f"[SyncWorker] 会话 {chat_name} 拉取到 {len(msgs)} 条消息")
                     # 【补上】写入同步进度，否则下次启动无法识别已完成初始化
                     last_msg_time = msgs[-1].get('time', '')
                     normalized_time = _normalize_time(last_msg_time)
@@ -108,7 +105,7 @@ class SyncWorker(QObject):
                     db_conn.close()
                     # 发送消息信号
                     self.messages_ready.emit(msgs)
-
+                    
                     # 【关键】写入该会话最后一条消息的时间，用于增量同步
                     last_msg_time = msgs[-1].get('time', '')
                     normalized_time = _normalize_time(last_msg_time)
@@ -122,13 +119,19 @@ class SyncWorker(QObject):
                         normalized_time,
                         last_ts
                     )
-
+                                # 每完成 20% 或最后一个时打印一次进度
+                if completed == 1 or completed == total or completed % max(1, total // 5) == 0:
+                    percent = int(completed / total * 100)
+                    logger.info(f"[SyncWorker] 进度 {completed}/{total} ({percent}%)")
                 # 发进度信号
                 self.progress_signal.emit(completed, total)
                 time.sleep(0.1)
-
+        logger.info(f"[SyncWorker] 全量同步完成, completed={completed}, total={total}, 即将发射 finished_signal")
+        logger.info(f"[SyncWorker] 全量同步结束，处理完成")
         self.finished_signal.emit()
-
+        logger.info("[SyncWorker] finished_signal 已发射")
+        if self.finished_callback:
+            self.finished_callback()
     def _fetch_one_chat(self, chat_name, is_group, username):
         """拉取单个会话的历史消息（在子线程中执行）"""
         from data.wechat_cli import run_wechat_cli, _parse_history_text
@@ -168,6 +171,7 @@ class IncrementalSyncWorker(QObject):
 
     def __init__(self):
         super().__init__()
+        self.changed_chats = set()  # 收集本次同步有变化的会话
         self._running = True
 
     def stop(self):
@@ -177,7 +181,7 @@ class IncrementalSyncWorker(QObject):
         sessions = get_sessions_list(limit=500)
         total = len(sessions)
         db_conn = get_conn()
-
+        logger.info(f"[IncWorker] 开始增量同步，共 {total} 个会话")  # ← 紧接在后
         for i, session in enumerate(sessions):
             if not self._running:
                 break
@@ -213,10 +217,19 @@ class IncrementalSyncWorker(QObject):
                 except:
                     last_ts = 0
                 update_sync_progress(chat_name, normalized_time, last_ts)
-
+            self.changed_chats.add(chat_name)
+            completed = i + 1
+            if completed == 1 or completed == total or completed % max(1, total // 5) == 0:
+                percent = int(completed / total * 100)
+                logger.info(f"[IncWorker] 进度 {completed}/{total} ({percent}%)")
+            self.changed_chats.add(chat_name)   
             self.progress_signal.emit(i + 1, total)
             self.messages_ready.emit(msgs)
             time.sleep(0.1)
 
         db_conn.close()
+        logger.info(f"[IncWorker] 增量同步完成, 即将发射 finished_signal")
         self.finished_signal.emit()
+        logger.info("[IncWorker] finished_signal 已发射")
+        if self.finished_callback:
+            self.finished_callback()

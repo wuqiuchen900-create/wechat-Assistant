@@ -1,5 +1,5 @@
 # core/engine.py
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from data.wechat_cli import get_new_messages
 from data.storage import (
     init_db, get_message_count, get_all_messages,
@@ -10,13 +10,15 @@ import time
 from core.sync_worker import SyncWorker, IncrementalSyncWorker
 from concurrent.futures import ThreadPoolExecutor
 from data.storage import save_messages_batch_fast
-
+from debug_log import logger
 
 class MessageEngine(QThread):
     new_messages_signal = pyqtSignal(list)
     urgent_message_signal = pyqtSignal(dict)
     sync_progress_signal = pyqtSignal(int, int)
-    sync_finished_signal = pyqtSignal()
+    sync_finished_signal = pyqtSignal(object)
+    sync_error_signal = pyqtSignal(str)
+    sync_worker_ready = pyqtSignal(object)  # 新增：告诉外界同步工作器已创建，把工作器对象传出去
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,16 +74,16 @@ class MessageEngine(QThread):
         return result
 
     def run(self):
+        logger.info("[引擎] 线程开始运行")
         """主引擎线程入口"""
         init_db()
 
         # ===== 快照恢复模式：如果已有缓存，通知界面恢复快照并跳过全量重新加载 =====
         if is_db_initialized():
-            # 发送特殊信号，让界面从快照文件恢复
+            logger.info("[引擎] 数据库已初始化，发射快照信号 (-2,-2)")
             self.sync_progress_signal.emit(-2, -2)
-            # 跳过第一层分页加载缓存（界面已恢复快照，无需重新发射消息）
         else:
-            # 第一层：启动秒开缓存（首次启动时缓存为空，所以直接跳过）
+            logger.info("[引擎] 数据库未初始化，跳过快照")
             total_cached = get_message_count()
             page_size = 100
             offset = 0
@@ -96,41 +98,58 @@ class MessageEngine(QThread):
 
         # ===== 第二层：根据是否有缓存，选择同步策略 =====
         if self._enable_full_sync and not is_db_initialized():
+            logger.info("[引擎] 进入全量同步")
             # 首次启动：全量同步（10个工人并行拉500个会话）
             self.sync_progress_signal.emit(-1, -1)
             self._sync_thread = QThread()
             self._sync_worker = SyncWorker()
+            self.sync_worker_ready.emit(self._sync_worker)
+            logger.info("[引擎] 已发射 sync_worker_ready")  # 新增：通知外界，工作器来了
             self._sync_worker.moveToThread(self._sync_thread)
-            self._sync_worker.progress_signal.connect(self.sync_progress_signal.emit)
-            self._sync_worker.finished_signal.connect(self.sync_finished_signal.emit)
+            self._sync_worker.finished_callback = lambda: (
+                logger.info("[引擎] worker 回调触发，转发 sync_finished_signal"),
+                self.sync_finished_signal.emit(self._sync_worker.changed_chats if hasattr(self._sync_worker, 'changed_chats') else set())
+            )
             self._sync_worker.messages_ready.connect(self._process_synced_messages)
             self._sync_thread.started.connect(self._sync_worker.do_full_sync)
+            # 兜底：线程结束时，如果还没收到完成信号，就补发一次
+            self._sync_thread.finished.connect(lambda: (
+                logger.info("[引擎·兜底] 同步线程 finished，补发 sync_finished_signal"),
+                print("[引擎·保底] 全量同步线程已结束，补发完成信号"),
+                self.sync_finished_signal.emit()
+            ))
             self._sync_thread.start()
             print("[引擎] 首次启动，执行全量同步...")
         else:
+            logger.info("[引擎] 进入增量同步")
             # 后续启动：轻量增量同步
             self.sync_progress_signal.emit(-1, -1)
             self._sync_thread = QThread()
             self._sync_worker = IncrementalSyncWorker()
+            self.sync_worker_ready.emit(self._sync_worker)  # 新增
             self._sync_worker.moveToThread(self._sync_thread)
-            self._sync_worker.progress_signal.connect(self.sync_progress_signal.emit)
-            self._sync_worker.finished_signal.connect(self.sync_finished_signal.emit)
+            self._sync_worker.finished_callback = lambda: (
+                logger.info("[引擎] worker 回调触发，转发 sync_finished_signal"),
+                self.sync_finished_signal.emit(self._sync_worker.changed_chats if hasattr(self._sync_worker, 'changed_chats') else set())
+            )
             self._sync_worker.messages_ready.connect(self._process_synced_messages)
             self._sync_thread.started.connect(self._sync_worker.do_incremental_sync)
+            # 同样的兜底
+            self._sync_thread.finished.connect(lambda: (
+                print("[引擎·保底] 增量同步线程已结束，补发完成信号"),
+                self.sync_finished_signal.emit()
+            ))
             self._sync_thread.start()
             print("[引擎] 已有缓存，执行增量同步...")
-
         # ===== 第三层：轻量实时轮询 =====
         db_conn = get_conn()
         loop_count = 0
-
         while self._running:
             loop_count += 1
             if loop_count % 5 == 0:
                 self._reload_keywords()
                 self._reload_blacklist()
                 self._reload_reminder_settings()
-
             try:
                 new_msgs = []
                 latest_msgs = get_new_messages()
@@ -152,15 +171,12 @@ class MessageEngine(QThread):
                                 self.urgent_message_signal.emit(m)
             except Exception as e:
                 print(f"[实时轮询错误] {e}")
-
             time.sleep(self._poll_interval)
-
         # 退出清理
         self._sync_worker.stop()
         self._sync_thread.quit()
         self._sync_thread.wait()
         db_conn.close()
-
     def _process_synced_messages(self, messages):
         """接收后台同步的消息，打标签后发给界面"""
         tagged = self._filter_and_tag(messages)

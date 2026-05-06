@@ -200,11 +200,11 @@ def get_message_count():
     return row[0] if row else 0
 
 def is_db_initialized():
-    """判断数据库是否已完成首次全量拉取"""
+    """只要 messages 表有数据，就认为数据库已初始化，无需全量同步"""
     conn = get_conn()
-    row = conn.execute("SELECT COUNT(*) FROM sync_progress").fetchone()
+    row = conn.execute("SELECT COUNT(*) FROM messages").fetchone()
     conn.close()
-    return (row[0] or 0) > 10
+    return (row[0] or 0) > 0
 def get_all_keywords():
     """获取所有启用的关键词，返回 (work_keywords, urgent_keywords)"""
     conn = get_conn()

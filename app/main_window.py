@@ -14,6 +14,9 @@ import requests
 from data.wechat_cli import get_contact_detail
 from app.settings_page import SettingsPage
 from PyQt5.QtWidgets import QApplication
+from debug_log import logger
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -252,6 +255,50 @@ class MainWindow(QMainWindow):
             elif last_msg.get('is_work'):
                 item.setForeground(Qt.darkBlue)
             self.session_list.addItem(item)
+    def _refresh_changed_sessions(self, changed_chats):
+        """只刷新有变化的会话条目，不重建整个列表"""
+        if not changed_chats:
+            return
+        
+        for chat in changed_chats:
+            # 从 all_messages_list 找出该会话最新一条消息
+            msgs = [m for m in self.all_messages_list if m.get('chat') == chat]
+            if not msgs:
+                continue
+            latest_msg = max(msgs, key=lambda x: self._parse_time(x.get('time', '')))
+            
+            sender = latest_msg.get('sender', '')
+            content = latest_msg.get('content', '')
+            time_str = latest_msg.get('time', '')
+            display_name = self._shorten_name(chat, 18)
+            display = f"{time_str}  {display_name}"
+            if sender:
+                display += f"  ({sender})"
+            display += f"  : {content[:40]}"
+            
+            # 查找列表中对应的 item，更新文本并移到顶部
+            found = False
+            for i in range(self.session_list.count()):
+                item = self.session_list.item(i)
+                if item and item.data(Qt.UserRole) == chat:
+                    item.setText(display)
+                    # 移到最后（最新消息在最上面）
+                    self.session_list.takeItem(i)
+                    self.session_list.insertItem(0, item)
+                    found = True
+                    break
+            
+            # 如果列表里还没有这个会话，创建一个新条目
+            if not found:
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, chat)
+                username = latest_msg.get('username', '')
+                item.setData(Qt.UserRole + 1, username)
+                if latest_msg.get('is_urgent'):
+                    item.setForeground(Qt.red)
+                elif latest_msg.get('is_work'):
+                    item.setForeground(Qt.darkBlue)
+                self.session_list.insertItem(0, item)            
     def _parse_time(self, time_str):
         import datetime
         if not time_str:
@@ -424,7 +471,49 @@ class MainWindow(QMainWindow):
             return True
         except:
             return False
+    def _load_cached_messages(self):
+        """从数据库静默加载历史消息到内存，不刷新界面"""
+        from data.storage import get_message_count, get_all_messages
 
+        total = get_message_count()
+        if total == 0:
+            return
+
+        page_size = 200   # 每次读 200 条，避免界面长时间冻结
+        offset = 0
+        while offset < total:
+            batch = get_all_messages(limit=page_size, offset=offset)
+            if not batch:
+                break
+            for msg in batch:
+                self.all_messages_list.append(msg)
+                chat = msg.get('chat', '')
+                time_str = msg.get('time', '')
+                new_ts = self._parse_time(time_str)
+                if chat not in self.session_data:
+                    self.session_data[chat] = {'last_msg': msg, 'count': 0, 'last_ts': new_ts}
+                else:
+                    old_ts = self.session_data[chat].get('last_ts', 0)
+                    if new_ts >= old_ts:
+                        self.session_data[chat]['last_msg'] = msg
+                        self.session_data[chat]['last_ts'] = new_ts
+                self.session_data[chat]['count'] += 1
+                self.msg_count += 1
+            offset += page_size
+            # 允许 UI 呼吸一下
+            QApplication.processEvents()
+
+        # 更新统计面板
+        from data.storage import get_message_count
+        self.stats_total.setText(f"📦 缓存: {get_message_count()} 条")
+        today_count = sum(
+            1 for m in self.all_messages_list
+            if m.get('time', '').startswith(time.strftime('%Y-%m-%d'))
+        )
+        urgent_count = sum(1 for m in self.all_messages_list if m.get('is_urgent'))
+        self.stats_today.setText(f"📊 今日: {today_count} 条")
+        self.stats_active.setText(f"💬 活跃会话: {len(self.session_data)} 个")
+        self.stats_urgent.setText(f"🔴 紧急: {urgent_count} 条")
     def closeEvent(self, event):
         """关闭窗口时保存界面快照"""
         self.save_snapshot()
@@ -475,9 +564,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int, int)
     def update_sync_progress(self, current, total):
         if current == -2 and total == -2:
-            # 快照恢复模式
             self.restore_snapshot()
-            self.status_bar.setText("就绪 (已恢复快照)")
+            self.status_bar.setText("就绪 (正在加载历史数据...)")
+            QTimer.singleShot(50, self._load_cached_messages)  # 稍微延迟，让快照先显示
             return
         if current == -1 and total == -1:
             self.status_bar.setText("正在同步历史消息...")
@@ -491,28 +580,29 @@ class MainWindow(QMainWindow):
                 percent = int(current / total * 100)
                 self.status_bar.setText(f"正在同步历史消息... {percent}%")
 
-    @pyqtSlot()
-    def on_sync_finished(self):
-        # 1. 立即标记结束并更新界面，让程序"活"过来
-        self._sync_in_progress = False
+    @pyqtSlot(object)
+    def on_sync_finished(self, changed_chats=None):
+        logger.info("[主窗口] on_sync_finished 被调用，准备隐藏进度条")
+        # 立刻强制隐藏进度条
         self.sync_progress_bar.hide()
+        self.sync_progress_bar.setVisible(False)
+        QApplication.processEvents()   # 立刻刷新界面        
+        self._sync_in_progress = False
         from data.storage import get_message_count
-        self.status_bar.setText(f"就绪 | 清理并准备加载头像...")
-        
-        # 强制处理积压的事件，确保界面立即刷新
-        QApplication.processEvents()
+        self.status_bar.setText(f"就绪 | 清理并准备加载头像...")        
+        QApplication.processEvents()        
+        # 如果知道哪些会话变化了，就局部刷新；否则全量重建（兜底）
+        if changed_chats:
+            QTimer.singleShot(200, lambda: self._refresh_changed_sessions(changed_chats))
+        else:
+            QTimer.singleShot(200, self._update_session_list)
 
-        # 2. 分步延迟执行，避免主线程阻塞
-        QTimer.singleShot(200, self._update_session_list)
         QTimer.singleShot(500, self._load_avatars)
-
-        # 再过 1 秒更新状态栏并保存快照
         QTimer.singleShot(1000, self._on_sync_cleanup)
 
     def _on_sync_cleanup(self):
         """同步完成后的更新状态栏并保存快照"""
         from data.storage import get_message_count
-
         self._update_session_list()
         self.status_bar.setText(f"就绪 | 缓存消息: {get_message_count()} 条")
         self.save_snapshot()
