@@ -3,7 +3,7 @@ import time
 import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 from data.wechat_cli import get_sessions_list, get_history_since
-from data.storage import get_conn, save_messages_batch_with_conn, update_sync_progress, get_last_sync_time
+from core.data_manager import _get_conn as get_conn, commit_messages as save_messages_batch_with_conn, update_sync_progress, get_last_sync_time
 from debug_log import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime as dt, timedelta
@@ -117,12 +117,10 @@ class SyncWorker(QObject):
                 # 每完成 BATCH_SIZE 个会话，或者全部完成，就写库并发信号
                 if completed % BATCH_SIZE == 0 or completed == total:
                     if batch_msgs:
-                        db_conn = get_conn()
-                        save_messages_batch_with_conn(db_conn, batch_msgs)
-                        db_conn.close()
+                        save_messages_batch_with_conn(batch_msgs)          # 不再传 db_conn
                         self.messages_ready.emit(batch_msgs)
                         logger.info(f"[SyncWorker] 批次写入 {len(batch_msgs)} 条消息 (已完成 {completed}/{total})")
-                        batch_msgs = []  # 清空缓冲区
+                        batch_msgs = []
                 
                 self.progress_signal.emit(completed, total)
                 
@@ -222,7 +220,7 @@ class IncrementalSyncWorker(QObject):
                 m['is_group'] = is_group
                 m['username'] = username
 
-            save_messages_batch_with_conn(db_conn, msgs)
+            save_messages_batch_with_conn(msgs)
 
             if msgs:
                 logger.info(f"[IncWorker·拉取] {chat_name}: +{len(msgs)}条, "

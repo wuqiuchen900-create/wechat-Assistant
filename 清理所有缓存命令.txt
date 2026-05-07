@@ -3,5 +3,11 @@ del /s /q D:\wechat-Assistant\app\__pycache__
 del /s /q D:\wechat-Assistant\core\__pycache__
 del /s /q D:\wechat-Assistant\data\__pycache__
 del D:\wechat-Assistant\message_data\cache.db
+del D:\wechat-Assistant\message_data\cache.db-wal
+del D:\wechat-Assistant\message_data\cache.db-shm
 del D:\wechat-Assistant\message_data\snapshot.json
+del D:\wechat-Assistant\message_data\cache.db     2>nul
+del D:\wechat-Assistant\message_data\cache.db-wal 2>nul
+del D:\wechat-Assistant\message_data\cache.db-shm 2>nul
+del D:\wechat-Assistant\message_data\snapshot.json 2>nul
 python main.py

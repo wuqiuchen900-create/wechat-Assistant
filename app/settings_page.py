@@ -2,7 +2,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QListWidget, QListWidgetItem,
                              QComboBox)
-from data.storage import get_all_keywords, add_keyword, delete_keyword
+from core.data_manager import get_all_keywords, add_keyword, delete_keyword
 
 class SettingsPage(QWidget):
     def __init__(self):

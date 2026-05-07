@@ -1,0 +1,35 @@
+错误日志汇总与根因分析
+1. 数据库与架构层
+错误日志	根因	修复
+no such table: avatar_cache	DataManager 和 storage.py 两套初始化代码表结构不一致	合并为 data_manager.py，统一建表
+disk I/O error / database is locked	SQLite WAL 文件被异常退出锁死	删除 cache.db-shm / cache.db-wal 后重建
+Cannot operate on a closed database	跨线程共用连接，连接被关闭后复用	最终放弃数据库存头像，改用文件系统
+commit_messages() takes 1 positional argument but 2 were given	合并数据库代码后，实时轮询仍用两参数调用	改为单参数调用
+NameError: name 'get_message_count' is not defined	旧函数名未统一替换	改为 count_messages()
+2. 头像加载层
+错误日志	根因	修复
+[头像加载] 收集到 0 个待加载头像	消息存入数据库时缺少 username 字段	补全 INSERT 语句的 username 列
+[AvatarWorker] 加载失败(没找到文件): xxx	用 username 匹配文件名，但 head_imgs 存的是纯数字	Trae 方案：预建索引 + 网络下载兜底
+头像第二次启动全灰	下载了但没保存成功（数据库损坏 / 未持久化）	改用 avatars 文件夹存 JPG，启动时扫描
+每次查找都 os.walk() 全目录	无索引，O(n×m) 复杂度	启动时预建 _head_imgs_index，O(1) 查找
+QThread: Destroyed while thread is still running	创建线程后未保存引用，被 GC 回收	加 _pending_avatar_loaders 列表保持引用
+3. 代码结构层
+错误日志	根因	修复
+ModuleNotFoundError: No module named 'data.storage'	合并数据库后残留旧导入	全局替换为 core.data_manager
+ImportError: cannot import name 'xxx' from 'core.data_manager'	部分函数在合并时遗漏	逐个补全函数（add_keyword, delete_keyword 等）
+AttributeError: 'AvatarLoadWorker' object has no attribute 'avatar_dir'	属性名拼写（_avatar_dir vs avatar_dir）	统一为 _avatar_dir
+排序时灵时不灵	_update_session_list 可能被两个版本覆盖	统一加 sort(reverse=True) 强制排序
+4. 性能与线程
+现象	根因	修复
+全量同步界面卡死	同步时频繁发信号给 UI + 界面每次 os.walk() 查找	silent_mode + 分批写入 + 预建索引
+头像加载慢	单线程串行 + 每个头像都走网络下载	本地预建索引 + 本地文件优先
+线程爆炸	每条新消息建一个线程	改用全局单一 AvatarLoadWorker + 任务队列
+最重要的经验
+“能用数据库”不等于“必须用数据库”。头像这种二进制文件，直接存文件系统比数据库简单可靠十倍。
+
+预建索引是本地搜索的性能关键。不管多少文件，启动时扫一次建好映射，之后每次查找都是 O(1)。
+
+线程锁不能省。多线程共享集合/字典时，threading.Lock 是必须的，否则会有竞态。
+
+合并重复代码要趁早。两套数据库代码并存导致表结构不一致，是这次大部分问题的根源。
+
