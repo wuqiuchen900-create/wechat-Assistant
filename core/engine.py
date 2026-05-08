@@ -13,6 +13,7 @@ from core.data_manager import (
 )
 from core.sync_worker import SyncWorker, IncrementalSyncWorker
 from core.voice_transcriber import save_voice_message, get_voice_manager
+from core.smart_reminder import SmartReminderAnalyzer
 from concurrent.futures import ThreadPoolExecutor
 from debug_log import logger
 
@@ -64,6 +65,7 @@ class MessageEngine(QThread):
         self._enable_full_sync = True
         self._write_pool = ThreadPoolExecutor(max_workers=2)
         self._enable_popup = True
+        self._smart_analyzer = SmartReminderAnalyzer()
 
     def configure(self):
         init_db()
@@ -267,8 +269,10 @@ class MessageEngine(QThread):
                     if self._enable_popup:
                         for m in filtered:
                             if m.get('is_urgent') or m.get('priority_level', 0) >= 4:
-                                self.urgent_message_signal.emit(m)
-                                self.reminder_signal.emit(m)
+                                analysis = self._smart_analyzer.analyze_message(m)
+                                if analysis and analysis.get('is_genuine_urgent'):
+                                    self.urgent_message_signal.emit(analysis)
+                                    self.reminder_signal.emit(analysis)
             except Exception as e:
                 logger.error(f"[实时轮询错误] {e}")
             time.sleep(self._poll_interval)

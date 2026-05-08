@@ -284,8 +284,8 @@ class IncrementalSyncWorker(QObject):
             self.messages_ready.emit(msgs)
             time.sleep(0.1)
 
-        db_conn.close()
         self._fill_missing_sessions(sessions, synced_chats)
+        db_conn.close()
         logger.info(f"[IncWorker] 增量同步完成, 即将发射 finished_signal")
         self.finished_signal.emit()
         logger.info("[IncWorker] finished_signal 已发射")

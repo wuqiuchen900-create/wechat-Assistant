@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 from core.event_tracker import (get_all_events, get_events_by_chat,
                                 delete_event, run_analysis_now)
+from core.smart_reminder import count_pending_smart_reminders
 from debug_log import logger
 
 CATEGORY_ICONS = {
@@ -134,6 +135,34 @@ class EventPanel(QWidget):
         """)
         refresh_btn.clicked.connect(self._on_refresh)
         header.addWidget(refresh_btn)
+
+        monitor_btn = QPushButton("\U0001f4cb 监控面板")
+        monitor_btn.setObjectName("secondaryBtn")
+        monitor_btn.setStyleSheet("""
+            QPushButton {
+                background: #3d3d3d;
+                color: #b0b0b0;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: #4a4a4a; border-color: #5b9bd5; color: #5b9bd5; }
+        """)
+        monitor_btn.clicked.connect(self._on_open_monitor)
+        header.addWidget(monitor_btn)
+
+        self._pending_badge = QLabel("")
+        self._pending_badge.setStyleSheet("""
+            background: #ef4444;
+            color: white;
+            border-radius: 10px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: bold;
+        """)
+        self._pending_badge.hide()
+        header.addWidget(self._pending_badge)
         layout.addLayout(header)
 
         hint = QLabel("自动识别每个会话中的不同事件，按时间线和主题智能归类。分析在后台空闲时自动运行。")
@@ -178,6 +207,13 @@ class EventPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+        pending_count = count_pending_smart_reminders()
+        if pending_count > 0:
+            self._pending_badge.setText(f"\U0001f514 {pending_count} 条待处理提醒")
+            self._pending_badge.show()
+        else:
+            self._pending_badge.hide()
+
         if chat_filter:
             events = get_events_by_chat(chat_filter)
         else:
@@ -201,6 +237,16 @@ class EventPanel(QWidget):
         count = run_analysis_now()
         self.load_events()
         logger.info(f"[事件面板] 分析完成，发现 {count} 个事件")
+
+    def _on_open_monitor(self):
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        monitor = getattr(app, '_event_monitor', None)
+        if monitor:
+            monitor.show()
+            monitor.raise_()
+            monitor.activateWindow()
+            monitor.refresh_events()
 
     def showEvent(self, event):
         super().showEvent(event)

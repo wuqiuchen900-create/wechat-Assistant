@@ -5,12 +5,19 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import pyqtSlot, QTimer
 from app.reminder_popup import ReminderPopup
+from app.widgets.smart_popup import SmartPopup
+from app.widgets.event_monitor import EventMonitorWindow
 from app.main_window import MainWindow
 from core.engine import MessageEngine
 from core.reminder_manager import (
     init_reminders_table, add_reminder, get_pending_reminders,
     acknowledge_reminder, snooze_reminder, dismiss_reminder,
     count_pending_reminders
+)
+from core.smart_reminder import (
+    get_pending_smart_reminders, acknowledge_smart_reminder,
+    snooze_smart_reminder, dismiss_smart_reminder,
+    count_pending_smart_reminders
 )
 from core.event_tracker import start_event_tracker, run_analysis_now
 from debug_log import logger
@@ -48,6 +55,10 @@ class WeChatAssistantTray(QSystemTrayIcon):
 
         self._active_popups = []
 
+        self._event_monitor = EventMonitorWindow()
+        self._event_monitor.navigate_to_event.connect(self._on_monitor_navigate)
+        QApplication.instance()._event_monitor = self._event_monitor
+
         self._reminder_timer = QTimer()
         self._reminder_timer.timeout.connect(self._check_pending_reminders)
         self._reminder_timer.start(30000)
@@ -84,6 +95,10 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self.show_action.triggered.connect(self.show_main_window)
         self.menu.addAction(self.show_action)
 
+        self.monitor_action = QAction("事件监控面板")
+        self.monitor_action.triggered.connect(self._show_event_monitor)
+        self.menu.addAction(self.monitor_action)
+
         self.menu.addSeparator()
         self.quit_action = QAction("退出")
         self.quit_action.triggered.connect(self.quit_app)
@@ -107,13 +122,13 @@ class WeChatAssistantTray(QSystemTrayIcon):
 
     @pyqtSlot(dict)
     def on_urgent_message(self, msg):
-        priority = msg.get('priority_level', 0)
-        if priority >= 3:
-            add_reminder(msg)
+        if msg.get('is_genuine_urgent'):
+            from core.smart_reminder import save_smart_reminder
+            save_smart_reminder(msg)
 
     def _check_pending_reminders(self):
         try:
-            pending = get_pending_reminders()
+            pending = get_pending_smart_reminders()
             if not pending:
                 return
 
@@ -123,38 +138,59 @@ class WeChatAssistantTray(QSystemTrayIcon):
                     for p in self._active_popups
                 )
                 if not already_showing:
-                    self._show_reminder_popup(reminder)
+                    self._show_smart_popup(reminder)
         except Exception as e:
             logger.error(f"[提醒检查] 错误: {e}")
 
-    def _show_reminder_popup(self, reminder_data):
-        popup = ReminderPopup(reminder_data)
-        popup.acknowledged.connect(self._on_reminder_acknowledged)
-        popup.snoozed.connect(self._on_reminder_snoozed)
-        popup.dismissed.connect(self._on_reminder_dismissed)
-        popup.show_popup()
+    def _show_smart_popup(self, reminder_data):
+        popup = SmartPopup(reminder_data)
+        popup.acknowledged.connect(self._on_smart_acknowledged)
+        popup.snoozed.connect(self._on_smart_snoozed)
+        popup.dismissed.connect(self._on_smart_dismissed)
+        popup.view_detail.connect(self._on_smart_view_detail)
+        popup.show()
         self._active_popups.append(popup)
 
-    def _on_reminder_acknowledged(self, reminder_id):
-        acknowledge_reminder(reminder_id)
+    def _on_smart_acknowledged(self, reminder_id):
+        acknowledge_smart_reminder(reminder_id)
         self._cleanup_popup(reminder_id)
-        logger.info(f"[提醒] 已确认处理 #{reminder_id}")
+        logger.info(f"[智能提醒] 已确认处理 #{reminder_id}")
 
-    def _on_reminder_snoozed(self, reminder_id, minutes):
-        snooze_reminder(reminder_id, minutes)
+    def _on_smart_snoozed(self, reminder_id, minutes):
+        snooze_smart_reminder(reminder_id, minutes)
         self._cleanup_popup(reminder_id)
-        logger.info(f"[提醒] 已延时 #{reminder_id}，{minutes}分钟后再次提醒")
+        logger.info(f"[智能提醒] 已延时 #{reminder_id}，{minutes}分钟后再次提醒")
 
-    def _on_reminder_dismissed(self, reminder_id):
-        dismiss_reminder(reminder_id)
+    def _on_smart_dismissed(self, reminder_id):
+        dismiss_smart_reminder(reminder_id)
         self._cleanup_popup(reminder_id)
-        logger.info(f"[提醒] 已忽略 #{reminder_id}")
+        logger.info(f"[智能提醒] 已忽略 #{reminder_id}")
+
+    def _on_smart_view_detail(self, analysis):
+        self.main_window.show()
+        self.main_window.raise_()
+        self.main_window.activateWindow()
+        self.main_window._switch_page(3)
+        logger.info(f"[智能提醒] 查看详情 -> 事件追踪页面")
 
     def _cleanup_popup(self, reminder_id):
         self._active_popups = [
             p for p in self._active_popups
             if not (hasattr(p, 'reminder_id') and p.reminder_id == reminder_id)
         ]
+
+    def _show_event_monitor(self):
+        self._event_monitor.show()
+        self._event_monitor.raise_()
+        self._event_monitor.activateWindow()
+        self._event_monitor.refresh_events()
+
+    def _on_monitor_navigate(self, chat_name):
+        self.main_window.show()
+        self.main_window.raise_()
+        self.main_window.activateWindow()
+        self.main_window._switch_page(3)
+        logger.info(f"[事件监控] 导航到事件追踪页面，会话: {chat_name}")
 
     def quit_app(self):
         self._reminder_timer.stop()
