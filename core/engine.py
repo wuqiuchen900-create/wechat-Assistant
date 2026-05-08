@@ -8,7 +8,8 @@ from core.data_manager import (
     init_db, count_messages, get_all_messages,
     commit_messages, update_sync_progress, get_all_settings,
     get_all_keywords, get_all_blacklist, is_db_initialized,
-    save_messages_batch_fast, update_message_meta
+    save_messages_batch_fast, update_message_meta,
+    get_all_reminder_keywords
 )
 from core.sync_worker import SyncWorker, IncrementalSyncWorker
 from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +59,7 @@ class MessageEngine(QThread):
         self._blacklist = []
         self._work_keywords = []
         self._urgent_keywords = []
+        self._reminder_keywords = []
         self._enable_full_sync = True
         self._write_pool = ThreadPoolExecutor(max_workers=2)
         self._enable_popup = True
@@ -69,10 +71,12 @@ class MessageEngine(QThread):
         self._enable_full_sync = settings.get('enable_full_sync', '1') == '1'
         self._enable_popup = settings.get('enable_popup', '1') == '1'
         self._work_keywords, self._urgent_keywords = get_all_keywords()
+        self._reminder_keywords = get_all_reminder_keywords()
         self._blacklist = get_all_blacklist()
 
     def _reload_keywords(self):
         self._work_keywords, self._urgent_keywords = get_all_keywords()
+        self._reminder_keywords = get_all_reminder_keywords()
 
     def _reload_blacklist(self):
         self._blacklist = get_all_blacklist()
@@ -98,6 +102,15 @@ class MessageEngine(QThread):
             msg['is_work'] = any(kw in content for kw in self._work_keywords)
             msg['matched_keywords'] = [kw for kw in self._work_keywords if kw in content]
             self._smart_categorize(msg)
+
+            for rk in self._reminder_keywords:
+                kw = rk.get('keyword', '')
+                if kw and kw in content:
+                    msg['is_reminder'] = True
+                    msg['reminder_keyword'] = kw
+                    self.reminder_signal.emit(msg)
+                    break
+
             result.append(msg)
         return result
 

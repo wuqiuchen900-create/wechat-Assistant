@@ -54,5 +54,5 @@ class AvatarDelegate(QStyledItemDelegate):
             option.rect.width() - avatar_rect.width() - margin * 3,
             option.rect.height()
         )
-        painter.setPen(QPen(QColor("#333333")))
+        painter.setPen(QPen(QColor("#d0d0d0")))
         painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, index.data(Qt.DisplayRole))

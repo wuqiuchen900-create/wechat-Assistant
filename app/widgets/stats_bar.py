@@ -9,9 +9,9 @@ class StatsBar(QFrame):
 
         self.setStyleSheet("""
             #statsPanel {
-                background: #f9fafb;
-                border-top: 1px solid #e5e7eb;
-                border-bottom: 1px solid #e5e7eb;
+                background: #2d2d2d;
+                border-top: 1px solid #4a4a4a;
+                border-bottom: 1px solid #4a4a4a;
             }
         """)
 
@@ -20,13 +20,13 @@ class StatsBar(QFrame):
         layout.setSpacing(20)
 
         self.today_label = QLabel("\U0001f4c5 今日: 0")
-        self.today_label.setStyleSheet("font-size: 12px; color: #374151;")
+        self.today_label.setStyleSheet("font-size: 12px; color: #b0b0b0;")
         self.active_label = QLabel("\U0001f4ac 会话: 0")
-        self.active_label.setStyleSheet("font-size: 12px; color: #374151;")
+        self.active_label.setStyleSheet("font-size: 12px; color: #b0b0b0;")
         self.urgent_label = QLabel("\U0001f534 紧急: 0")
         self.urgent_label.setStyleSheet("font-size: 12px; color: #ef4444; font-weight: 600;")
         self.total_label = QLabel("\U0001f4e6 缓存: 0")
-        self.total_label.setStyleSheet("font-size: 12px; color: #6b7280;")
+        self.total_label.setStyleSheet("font-size: 12px; color: #888888;")
 
         layout.addWidget(self.today_label)
         layout.addWidget(self.active_label)

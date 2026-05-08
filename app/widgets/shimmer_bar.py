@@ -14,7 +14,7 @@ class ShimmerProgressBar(QProgressBar):
 
         self.setStyleSheet("""
             QProgressBar {
-                background-color: #f0f0f5;
+                background-color: #3d3d3d;
                 border: none;
                 border-radius: 3px;
             }

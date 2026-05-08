@@ -32,6 +32,7 @@ class WeChatAssistantTray(QSystemTrayIcon):
 
         self.engine = MessageEngine()
         self.engine.configure()
+        QApplication.instance().engine = self.engine
         logger.info("[托盘] 开始连接信号...")
         self.engine.start()
         logger.info("[托盘] 引擎线程已启动")
@@ -53,6 +54,28 @@ class WeChatAssistantTray(QSystemTrayIcon):
         QTimer.singleShot(5000, self._check_pending_reminders)
 
         self.menu = QMenu()
+        self.menu.setStyleSheet("""
+            QMenu {
+                background-color: #333333;
+                border: 1px solid #4a4a4a;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                color: #d0d0d0;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #3d4a5c;
+                color: #5b9bd5;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #4a4a4a;
+                margin: 4px 8px;
+            }
+        """)
         self.show_action = QAction("显示主面板")
         self.show_action.triggered.connect(self.show_main_window)
         self.menu.addAction(self.show_action)

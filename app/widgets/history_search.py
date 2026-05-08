@@ -12,17 +12,17 @@ class HistorySearchPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background: #f8f9fa;")
+        self.setStyleSheet("background: #2b2b2b;")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+        scroll.setStyleSheet("QScrollArea { border: none; background: #2b2b2b; }")
 
         self.inner = QWidget()
-        self.inner.setStyleSheet("background: #f8f9fa;")
+        self.inner.setStyleSheet("background: #2b2b2b;")
         self.layout = QVBoxLayout(self.inner)
         self.layout.setContentsMargins(24, 20, 24, 20)
         self.layout.setSpacing(14)
@@ -42,20 +42,20 @@ class HistorySearchPanel(QWidget):
         title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
-        title.setStyleSheet("color: #1a1a2e;")
+        title.setStyleSheet("color: #e0e0e0;")
         self.layout.addWidget(title)
 
         subtitle = QLabel("搜索历史消息，支持关键词、日期、分类筛选")
-        subtitle.setStyleSheet("color: #6c757d; font-size: 13px;")
+        subtitle.setStyleSheet("color: #888888; font-size: 13px;")
         self.layout.addWidget(subtitle)
 
     def _build_search_bar(self):
         bar = QFrame()
         bar.setStyleSheet("""
             QFrame {
-                background: #ffffff;
+                background: #333333;
                 border-radius: 12px;
-                border: 1px solid #e5e7eb;
+                border: 1px solid #4a4a4a;
             }
         """)
         bl = QHBoxLayout(bar)
@@ -72,7 +72,7 @@ class HistorySearchPanel(QWidget):
             QLineEdit {
                 border: none;
                 font-size: 14px;
-                color: #333;
+                color: #d0d0d0;
                 background: transparent;
                 padding: 4px;
             }
@@ -83,7 +83,7 @@ class HistorySearchPanel(QWidget):
         search_btn = QPushButton("搜索")
         search_btn.setStyleSheet("""
             QPushButton {
-                background: #4a6cf7;
+                background: #5b9bd5;
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -91,7 +91,7 @@ class HistorySearchPanel(QWidget):
                 font-size: 13px;
                 font-weight: bold;
             }
-            QPushButton:hover { background: #3b5de7; }
+            QPushButton:hover { background: #4a8ac4; }
         """)
         search_btn.clicked.connect(self._do_search)
         bl.addWidget(search_btn)
@@ -102,9 +102,9 @@ class HistorySearchPanel(QWidget):
         filters = QFrame()
         filters.setStyleSheet("""
             QFrame {
-                background: #ffffff;
+                background: #333333;
                 border-radius: 10px;
-                border: 1px solid #e5e7eb;
+                border: 1px solid #4a4a4a;
             }
         """)
         fl = QHBoxLayout(filters)
@@ -112,49 +112,63 @@ class HistorySearchPanel(QWidget):
         fl.setSpacing(12)
 
         fl.addWidget(QLabel("分类:"))
+        fl.itemAt(fl.count() - 1).widget().setStyleSheet("color: #b0b0b0;")
         self.cat_combo = QComboBox()
         self.cat_combo.addItems(["全部", "财务", "会议", "任务", "文档", "个人", "紧急"])
         self.cat_combo.setStyleSheet("""
             QComboBox {
-                border: 1px solid #d1d5db;
+                border: 1px solid #555555;
                 border-radius: 6px;
                 padding: 4px 8px;
                 font-size: 12px;
                 min-width: 80px;
+                background: #3d3d3d;
+                color: #d0d0d0;
+            }
+            QComboBox QAbstractItemView {
+                background: #3d3d3d;
+                color: #d0d0d0;
+                selection-background-color: #4a4a4a;
             }
         """)
         fl.addWidget(self.cat_combo)
 
         fl.addWidget(QLabel("日期:"))
+        fl.itemAt(fl.count() - 1).widget().setStyleSheet("color: #b0b0b0;")
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
         self.date_from.setDate(QDate.currentDate().addDays(-7))
         self.date_from.setStyleSheet("""
             QDateEdit {
-                border: 1px solid #d1d5db;
+                border: 1px solid #555555;
                 border-radius: 6px;
                 padding: 4px 6px;
                 font-size: 12px;
+                background: #3d3d3d;
+                color: #d0d0d0;
             }
         """)
         fl.addWidget(self.date_from)
 
         fl.addWidget(QLabel("至"))
+        fl.itemAt(fl.count() - 1).widget().setStyleSheet("color: #b0b0b0;")
         self.date_to = QDateEdit()
         self.date_to.setCalendarPopup(True)
         self.date_to.setDate(QDate.currentDate())
         self.date_to.setStyleSheet("""
             QDateEdit {
-                border: 1px solid #d1d5db;
+                border: 1px solid #555555;
                 border-radius: 6px;
                 padding: 4px 6px;
                 font-size: 12px;
+                background: #3d3d3d;
+                color: #d0d0d0;
             }
         """)
         fl.addWidget(self.date_to)
 
         self.urgent_only = QCheckBox("仅紧急")
-        self.urgent_only.setStyleSheet("font-size: 12px;")
+        self.urgent_only.setStyleSheet("font-size: 12px; color: #b0b0b0;")
         fl.addWidget(self.urgent_only)
 
         fl.addStretch()
@@ -162,7 +176,7 @@ class HistorySearchPanel(QWidget):
         ai_btn = QPushButton("\U0001f916 AI 分析")
         ai_btn.setStyleSheet("""
             QPushButton {
-                background: linear-gradient(135deg, #667eea, #764ba2);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -170,7 +184,7 @@ class HistorySearchPanel(QWidget):
                 font-size: 12px;
                 font-weight: bold;
             }
-            QPushButton:hover { background: linear-gradient(135deg, #5a6fd6, #6a4190); }
+            QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5a6fd6, stop:1 #6a4190); }
         """)
         ai_btn.clicked.connect(self._do_ai_search)
         fl.addWidget(ai_btn)
@@ -179,7 +193,7 @@ class HistorySearchPanel(QWidget):
 
     def _build_results_area(self):
         self.result_header = QLabel("搜索结果将显示在这里")
-        self.result_header.setStyleSheet("color: #6c757d; font-size: 13px; padding: 8px 0;")
+        self.result_header.setStyleSheet("color: #888888; font-size: 13px; padding: 8px 0;")
         self.layout.addWidget(self.result_header)
 
         self.results_container = QVBoxLayout()
@@ -255,7 +269,7 @@ class HistorySearchPanel(QWidget):
 
         if not results:
             empty = QLabel("未找到匹配的消息")
-            empty.setStyleSheet("color: #adb5bd; font-size: 13px; padding: 20px;")
+            empty.setStyleSheet("color: #666666; font-size: 13px; padding: 20px;")
             self.results_container.addWidget(empty)
             return
 
@@ -265,7 +279,7 @@ class HistorySearchPanel(QWidget):
 
         if count > 50:
             more = QLabel(f"... 还有 {count - 50} 条结果未显示，请缩小搜索范围")
-            more.setStyleSheet("color: #adb5bd; font-size: 12px; padding: 8px;")
+            more.setStyleSheet("color: #666666; font-size: 12px; padding: 8px;")
             self.results_container.addWidget(more)
 
     def _make_result_row(self, msg):
@@ -275,7 +289,7 @@ class HistorySearchPanel(QWidget):
         color = colors.get(priority, "#9ca3af")
         row.setStyleSheet(f"""
             QFrame {{
-                background: #ffffff;
+                background: #333333;
                 border-radius: 8px;
                 border-left: 3px solid {color};
                 padding: 0;
@@ -287,17 +301,17 @@ class HistorySearchPanel(QWidget):
 
         header = QHBoxLayout()
         chat_lbl = QLabel(msg.get('chat', '')[:25])
-        chat_lbl.setStyleSheet("color: #4a6cf7; font-size: 12px; font-weight: bold;")
+        chat_lbl.setStyleSheet("color: #5b9bd5; font-size: 12px; font-weight: bold;")
         header.addWidget(chat_lbl)
         header.addStretch()
         time_lbl = QLabel(msg.get('time', ''))
-        time_lbl.setStyleSheet("color: #adb5bd; font-size: 11px;")
+        time_lbl.setStyleSheet("color: #666666; font-size: 11px;")
         header.addWidget(time_lbl)
         rl.addLayout(header)
 
         content = msg.get('content', '')[:100]
         content_lbl = QLabel(f"{msg.get('sender', '')}: {content}")
-        content_lbl.setStyleSheet("color: #333; font-size: 12px;")
+        content_lbl.setStyleSheet("color: #d0d0d0; font-size: 12px;")
         content_lbl.setWordWrap(True)
         rl.addWidget(content_lbl)
 

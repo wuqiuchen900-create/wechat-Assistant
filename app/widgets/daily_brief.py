@@ -9,17 +9,17 @@ from core.data_manager import count_messages, get_urgent_messages
 class DailyBriefPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background: #f8f9fa;")
+        self.setStyleSheet("background: #2b2b2b;")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+        scroll.setStyleSheet("QScrollArea { border: none; background: #2b2b2b; }")
 
         self.inner = QWidget()
-        self.inner.setStyleSheet("background: #f8f9fa;")
+        self.inner.setStyleSheet("background: #2b2b2b;")
         self.layout = QVBoxLayout(self.inner)
         self.layout.setContentsMargins(24, 20, 24, 20)
         self.layout.setSpacing(16)
@@ -43,18 +43,18 @@ class DailyBriefPanel(QWidget):
         title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
-        title.setStyleSheet("color: #1a1a2e; padding: 0;")
+        title.setStyleSheet("color: #e0e0e0; padding: 0;")
         self.layout.addWidget(title)
 
         subtitle = QLabel("自动汇总今日消息动态与待处理事项")
-        subtitle.setStyleSheet("color: #6c757d; font-size: 13px; padding: 0;")
+        subtitle.setStyleSheet("color: #888888; font-size: 13px; padding: 0;")
         self.layout.addWidget(subtitle)
 
     def _build_summary_cards(self):
         cards = QHBoxLayout()
         cards.setSpacing(12)
 
-        self.card_total = self._make_card("\U0001f4e8", "总消息", "0", "#4a6cf7")
+        self.card_total = self._make_card("\U0001f4e8", "总消息", "0", "#5b9bd5")
         self.card_today = self._make_card("\U0001f4c5", "今日", "0", "#10b981")
         self.card_urgent = self._make_card("\U0001f534", "紧急", "0", "#ef4444")
         self.card_session = self._make_card("\U0001f4ac", "活跃会话", "0", "#f59e0b")
@@ -67,7 +67,7 @@ class DailyBriefPanel(QWidget):
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
-                background: #ffffff;
+                background: #333333;
                 border-radius: 12px;
                 border-left: 4px solid {color};
                 padding: 0;
@@ -79,7 +79,7 @@ class DailyBriefPanel(QWidget):
         cl.setSpacing(4)
 
         icon_lbl = QLabel(f"{icon}  {label}")
-        icon_lbl.setStyleSheet("color: #6c757d; font-size: 12px;")
+        icon_lbl.setStyleSheet("color: #888888; font-size: 12px;")
         cl.addWidget(icon_lbl)
 
         val_lbl = QLabel(value)
@@ -100,7 +100,7 @@ class DailyBriefPanel(QWidget):
         section_font.setPointSize(14)
         section_font.setBold(True)
         section.setFont(section_font)
-        section.setStyleSheet("color: #1a1a2e; padding: 0; margin-top: 8px;")
+        section.setStyleSheet("color: #e0e0e0; padding: 0; margin-top: 8px;")
         self.layout.addWidget(section)
 
         self.urgent_container = QVBoxLayout()
@@ -108,7 +108,7 @@ class DailyBriefPanel(QWidget):
         self.layout.addLayout(self.urgent_container)
 
         self.urgent_empty = QLabel("暂无紧急事项 \u2728")
-        self.urgent_empty.setStyleSheet("color: #adb5bd; font-size: 13px; padding: 12px;")
+        self.urgent_empty.setStyleSheet("color: #666666; font-size: 13px; padding: 12px;")
         self.urgent_container.addWidget(self.urgent_empty)
 
     def _build_category_section(self):
@@ -117,7 +117,7 @@ class DailyBriefPanel(QWidget):
         section_font.setPointSize(14)
         section_font.setBold(True)
         section.setFont(section_font)
-        section.setStyleSheet("color: #1a1a2e; padding: 0; margin-top: 8px;")
+        section.setStyleSheet("color: #e0e0e0; padding: 0; margin-top: 8px;")
         self.layout.addWidget(section)
 
         self.cat_grid = QGridLayout()
@@ -157,7 +157,7 @@ class DailyBriefPanel(QWidget):
                 self.urgent_container.addWidget(row)
         else:
             self.urgent_empty = QLabel("暂无紧急事项 \u2728")
-            self.urgent_empty.setStyleSheet("color: #adb5bd; font-size: 13px; padding: 12px;")
+            self.urgent_empty.setStyleSheet("color: #666666; font-size: 13px; padding: 12px;")
             self.urgent_container.addWidget(self.urgent_empty)
 
         while self.cat_grid.count() > 0:
@@ -195,7 +195,7 @@ class DailyBriefPanel(QWidget):
         color = colors.get(priority, "#ef4444")
         row.setStyleSheet(f"""
             QFrame {{
-                background: #ffffff;
+                background: #333333;
                 border-radius: 8px;
                 border-left: 3px solid {color};
                 padding: 0;
@@ -207,13 +207,13 @@ class DailyBriefPanel(QWidget):
         chat = msg.get('chat', '')[:20]
         content = msg.get('content', '')[:50]
         lbl = QLabel(f"{chat}  |  {content}")
-        lbl.setStyleSheet("color: #333; font-size: 12px;")
+        lbl.setStyleSheet("color: #d0d0d0; font-size: 12px;")
         lbl.setWordWrap(True)
         rl.addWidget(lbl)
         rl.addStretch()
 
         time_lbl = QLabel(msg.get('time', '')[-8:] if msg.get('time') else '')
-        time_lbl.setStyleSheet("color: #adb5bd; font-size: 11px;")
+        time_lbl.setStyleSheet("color: #666666; font-size: 11px;")
         rl.addWidget(time_lbl)
 
         return row

@@ -11,6 +11,7 @@ from app.widgets.daily_brief import DailyBriefPanel
 from app.widgets.history_search import HistorySearchPanel
 from core.data_manager import count_messages, get_all_blacklist
 from core.ai_search import AISearchEngine
+from app.styles import GLOBAL_STYLE
 
 
 class MainWindow(QMainWindow):
@@ -21,72 +22,7 @@ class MainWindow(QMainWindow):
 
         self.ai_engine = AISearchEngine()
 
-        self.setStyleSheet("""
-            QMainWindow { background-color: #f3f4f6; }
-            #sideNav {
-                background-color: #ffffff;
-                border-right: 1px solid #e5e7eb;
-                min-width: 190px;
-                max-width: 190px;
-            }
-            #navBtn {
-                text-align: left;
-                padding: 12px 18px;
-                border: none;
-                border-radius: 10px;
-                font-size: 13px;
-                color: #6b7280;
-                background: transparent;
-                margin: 2px 6px;
-            }
-            #navBtn:hover { background-color: #f3f4f6; color: #111827; }
-            #navBtn:checked { background-color: #eff6ff; color: #2563eb; font-weight: 600; }
-            #detailPanel {
-                background: #ffffff;
-                border-left: 1px solid #e5e7eb;
-                padding: 20px;
-            }
-            #statusBar {
-                background: #ffffff;
-                border-top: 1px solid #e5e7eb;
-                padding: 8px 16px;
-                color: #9ca3af;
-                font-size: 12px;
-            }
-            QListWidget {
-                border: none;
-                background: transparent;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 8px 10px;
-                border-bottom: 1px solid #f3f4f6;
-            }
-            QListWidget::item:hover { background-color: #f9fafb; }
-            QListWidget::item:selected { background-color: #eff6ff; color: #2563eb; }
-            QScrollBar:vertical {
-                width: 8px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                background: #d1d5db;
-                border-radius: 4px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover { background: #9ca3af; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QSplitter::handle {
-                background: #e5e7eb;
-                width: 4px;
-                height: 4px;
-            }
-            QSplitter::handle:hover { background: #9ca3af; }
-            #statsPanel {
-                background: #f9fafb;
-                border-top: 1px solid #e5e7eb;
-                padding: 10px 16px;
-            }
-        """)
+        self.setStyleSheet(GLOBAL_STYLE)
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -109,12 +45,12 @@ class MainWindow(QMainWindow):
         logo_font.setPointSize(16)
         logo_font.setBold(True)
         logo.setFont(logo_font)
-        logo.setStyleSheet("padding: 10px 14px; color: #111827;")
+        logo.setStyleSheet("padding: 10px 14px; color: #e0e0e0;")
         nav_layout.addWidget(logo)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background: #e5e7eb; max-height: 1px; margin: 8px 10px;")
+        sep.setStyleSheet("background: #4a4a4a; max-height: 1px; margin: 8px 10px;")
         nav_layout.addWidget(sep)
         nav_layout.addSpacing(8)
 
@@ -149,7 +85,7 @@ class MainWindow(QMainWindow):
         self.btn_settings.clicked.connect(self._open_settings)
 
         footer = QLabel("v0.6  \u00b7  本地运行")
-        footer.setStyleSheet("color: #d1d5db; font-size: 11px; padding: 10px;")
+        footer.setStyleSheet("color: #666666; font-size: 11px; padding: 10px;")
         nav_layout.addWidget(footer)
         main_layout.addWidget(self.nav)
 
@@ -270,10 +206,10 @@ class MainWindow(QMainWindow):
         dlg.setWindowTitle(f"\U0001f916 AI 分析: {keyword}")
         dlg.setMinimumSize(550, 400)
         dlg.setStyleSheet("""
-            QDialog { background: #ffffff; border-radius: 12px; }
-            QTextEdit { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-size: 13px; }
-            QPushButton { background: #4a6cf7; color: white; border: none; border-radius: 8px; padding: 8px 20px; font-weight: bold; }
-            QPushButton:hover { background: #3b5de7; }
+            QDialog { background: #333333; border-radius: 12px; }
+            QTextEdit { border: 1px solid #4a4a4a; border-radius: 8px; padding: 12px; font-size: 13px; background: #2b2b2b; color: #d0d0d0; }
+            QPushButton { background: #5b9bd5; color: white; border: none; border-radius: 8px; padding: 8px 20px; font-weight: bold; }
+            QPushButton:hover { background: #4a8ac4; }
         """)
         dl = QVBoxLayout(dlg)
         te = QTextEdit()

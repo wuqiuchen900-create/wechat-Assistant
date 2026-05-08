@@ -30,8 +30,8 @@ class ReminderPopup(QFrame):
 
         self.setStyleSheet("""
             QFrame#reminderPopup {
-                background: #ffffff;
-                border: 2px solid #e5e7eb;
+                background: #333333;
+                border: 2px solid #4a4a4a;
                 border-radius: 16px;
             }
         """)
@@ -58,7 +58,7 @@ class ReminderPopup(QFrame):
             content_text = content_text[:200] + "..."
         content = QLabel(content_text)
         content.setWordWrap(True)
-        content.setStyleSheet("color: #374151; font-size: 13px; line-height: 1.5;")
+        content.setStyleSheet("color: #d0d0d0; font-size: 13px; line-height: 1.5;")
         layout.addWidget(content)
 
         info_parts = []
@@ -76,30 +76,30 @@ class ReminderPopup(QFrame):
             info_parts.append(cat_names.get(reminder_data.get('category'), reminder_data.get('category')))
 
         info = QLabel("  |  ".join(info_parts))
-        info.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        info.setStyleSheet("color: #888888; font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
 
         snooze_row = QHBoxLayout()
         snooze_row.setSpacing(6)
         snooze_label = QLabel("\u23f0 稍后提醒:")
-        snooze_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        snooze_label.setStyleSheet("color: #888888; font-size: 11px;")
         snooze_row.addWidget(snooze_label)
         for text, minutes in SNOOZE_OPTIONS:
             btn = QPushButton(text)
             btn.setFixedHeight(28)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #f3f4f6;
-                    color: #374151;
-                    border: 1px solid #d1d5db;
+                    background: #3d3d3d;
+                    color: #b0b0b0;
+                    border: 1px solid #555555;
                     border-radius: 6px;
                     padding: 2px 10px;
                     font-size: 11px;
                 }
                 QPushButton:hover {
-                    background: #e5e7eb;
-                    border-color: #9ca3af;
+                    background: #4a4a4a;
+                    border-color: #888888;
                 }
             """)
             btn.clicked.connect(lambda checked, m=minutes: self._on_snooze(m))
@@ -114,14 +114,14 @@ class ReminderPopup(QFrame):
         dismiss_btn = QPushButton("忽略")
         dismiss_btn.setStyleSheet("""
             QPushButton {
-                background: #f3f4f6;
-                color: #6b7280;
+                background: #3d3d3d;
+                color: #888888;
                 border: none;
                 border-radius: 8px;
                 padding: 8px 18px;
                 font-size: 12px;
             }
-            QPushButton:hover { background: #e5e7eb; }
+            QPushButton:hover { background: #4a4a4a; }
         """)
         dismiss_btn.clicked.connect(self._on_dismiss)
         btn_layout.addWidget(dismiss_btn)

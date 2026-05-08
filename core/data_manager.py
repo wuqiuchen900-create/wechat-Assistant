@@ -72,6 +72,12 @@ def init_db():
             mtime REAL DEFAULT 0,
             updated_at REAL DEFAULT (strftime('%s', 'now'))
         );
+        CREATE TABLE IF NOT EXISTS reminder_keywords (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL UNIQUE,
+            enabled INTEGER DEFAULT 1,
+            created_at REAL DEFAULT (strftime('%s', 'now'))
+        );
         CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp);
         CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat);
         CREATE INDEX IF NOT EXISTS idx_sync_chat ON sync_progress(chat);
@@ -97,6 +103,18 @@ def init_db():
         conn.execute("ALTER TABLE messages ADD COLUMN priority_level INTEGER DEFAULT 0")
     except:
         pass
+
+    default_reminder_kws = [
+        "紧急", "马上", "立刻", "速回", "急急急", "出事了",
+        "截止", "deadline", "ddl", "尽快", "asap", "urgent",
+        "加急", "火速", "立即", "今天必须", "明天之前",
+    ]
+    for kw in default_reminder_kws:
+        try:
+            conn.execute("INSERT OR IGNORE INTO reminder_keywords (keyword) VALUES (?)", (kw,))
+        except:
+            pass
+
     conn.commit()
 
 
@@ -297,6 +315,60 @@ def toggle_keyword(keyword, enabled):
     conn = _get_conn()
     conn.execute("UPDATE keywords SET enabled = ? WHERE keyword = ?", (1 if enabled else 0, keyword))
     conn.commit()
+
+
+# ========== 提醒关键词 ==========
+
+def get_all_reminder_keywords():
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, keyword, enabled FROM reminder_keywords WHERE enabled=1 ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_reminder_keywords_raw():
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, keyword, enabled FROM reminder_keywords ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_reminder_keyword(keyword):
+    conn = _get_conn()
+    try:
+        conn.execute("INSERT OR IGNORE INTO reminder_keywords (keyword) VALUES (?)", (keyword,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"[提醒词] 添加失败: {e}")
+        return False
+
+
+def delete_reminder_keyword(keyword_id):
+    conn = _get_conn()
+    conn.execute("DELETE FROM reminder_keywords WHERE id = ?", (keyword_id,))
+    conn.commit()
+
+
+def toggle_reminder_keyword(keyword_id, enabled):
+    conn = _get_conn()
+    conn.execute("UPDATE reminder_keywords SET enabled = ? WHERE id = ?",
+                 (1 if enabled else 0, keyword_id))
+    conn.commit()
+
+
+def update_reminder_keyword(keyword_id, new_keyword):
+    conn = _get_conn()
+    try:
+        conn.execute("UPDATE reminder_keywords SET keyword = ? WHERE id = ?",
+                     (new_keyword, keyword_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"[提醒词] 更新失败: {e}")
+        return False
 
 
 # ========== 设置 ==========

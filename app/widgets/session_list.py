@@ -4,7 +4,7 @@ import time
 import datetime
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QAbstractItemView, QApplication
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QColor
 from debug_log import logger
 from core.avatar_loader import AvatarLoadWorker
 from core.data_manager import count_messages, get_all_messages, get_all_blacklist, save_snapshot, load_snapshot
@@ -157,7 +157,7 @@ class SessionListPanel(QListWidget):
             if last_msg.get('is_urgent'):
                 item.setForeground(Qt.red)
             elif last_msg.get('is_work'):
-                item.setForeground(Qt.darkBlue)
+                item.setForeground(QColor("#5b9bd5"))
             self.addItem(item)
 
     def _refresh_changed_sessions(self, changed_chats):
@@ -195,16 +195,16 @@ class SessionListPanel(QListWidget):
                 if latest_msg.get('is_urgent'):
                     item.setForeground(Qt.red)
                 elif latest_msg.get('is_work'):
-                    item.setForeground(Qt.darkBlue)
+                    item.setForeground(QColor("#5b9bd5"))
                 self.insertItem(0, item)
 
     def _on_item_clicked(self, item):
         chat = item.data(Qt.UserRole)
         msgs = [m for m in self.all_messages_list if m.get('chat') == chat]
-        msgs.sort(key=lambda x: self._parse_time(x.get('time', '')))
+        msgs.sort(key=lambda x: self._parse_time(x.get('time', '')), reverse=True)
 
         if msgs:
-            latest = msgs[-1]
+            latest = msgs[0]
             time_str = latest.get('time', '')
             sender = latest.get('sender', '')
             content = latest.get('content', '')
@@ -335,10 +335,7 @@ class SessionListPanel(QListWidget):
     def on_sync_finished(self, changed_chats=None):
         logger.info("[SessionList] on_sync_finished 被调用")
         self._sync_in_progress = False
-        if changed_chats:
-            QTimer.singleShot(200, lambda: self._refresh_changed_sessions(changed_chats))
-        else:
-            QTimer.singleShot(200, self._update_session_list)
+        QTimer.singleShot(200, self._update_session_list)
         QTimer.singleShot(1000, self._on_sync_cleanup)
 
     def _on_sync_cleanup(self):

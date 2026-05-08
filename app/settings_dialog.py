@@ -6,7 +6,10 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
 from PyQt5.QtCore import Qt
 from core.data_manager import (get_all_settings, save_setting, get_all_keywords,
                                add_keyword, delete_keyword, get_all_blacklist,
-                               add_blacklist, delete_blacklist)
+                               add_blacklist, delete_blacklist,
+                               get_all_reminder_keywords_raw, add_reminder_keyword,
+                               delete_reminder_keyword, toggle_reminder_keyword,
+                               update_reminder_keyword)
 
 
 class SettingsDialog(QDialog):
@@ -15,34 +18,35 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("\u2699\ufe0f 设置")
         self.setMinimumSize(720, 520)
         self.setStyleSheet("""
-            QDialog { background-color: #f3f4f6; }
+            QDialog { background-color: #2b2b2b; }
             #categoryList {
-                background: #ffffff;
-                border-right: 1px solid #e5e7eb;
+                background: #333333;
+                border-right: 1px solid #4a4a4a;
                 min-width: 170px;
                 max-width: 170px;
                 font-size: 13px;
                 outline: none;
+                color: #b0b0b0;
             }
             #categoryList::item {
                 padding: 14px 18px;
-                border-bottom: 1px solid #f3f4f6;
+                border-bottom: 1px solid #3a3a3a;
             }
             #categoryList::item:selected {
-                background-color: #eff6ff;
-                color: #2563eb;
+                background-color: #3d4a5c;
+                color: #5b9bd5;
                 font-weight: 600;
             }
             #contentArea {
-                background: #ffffff;
+                background: #333333;
                 border-radius: 12px;
                 margin: 10px;
             }
             QGroupBox {
                 font-size: 13px;
                 font-weight: bold;
-                color: #374151;
-                border: 1px solid #e5e7eb;
+                color: #b0b0b0;
+                border: 1px solid #4a4a4a;
                 border-radius: 10px;
                 margin-top: 12px;
                 padding-top: 16px;
@@ -51,17 +55,19 @@ class SettingsDialog(QDialog):
                 subcontrol-origin: margin;
                 left: 14px;
                 padding: 0 8px;
+                color: #d0d0d0;
             }
             QLineEdit, QSpinBox, QComboBox {
-                border: 1px solid #d1d5db;
+                border: 1px solid #555555;
                 border-radius: 6px;
                 padding: 6px 10px;
                 font-size: 12px;
-                background: #f9fafb;
+                background: #3d3d3d;
+                color: #d0d0d0;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-                border-color: #2563eb;
-                background: #ffffff;
+                border-color: #5b9bd5;
+                background: #444444;
             }
             QPushButton {
                 padding: 8px 18px;
@@ -69,14 +75,21 @@ class SettingsDialog(QDialog):
                 font-size: 12px;
                 font-weight: 600;
             }
-            #primaryBtn { background: #2563eb; color: white; border: none; }
-            #primaryBtn:hover { background: #1d4ed8; }
+            #primaryBtn { background: #5b9bd5; color: white; border: none; }
+            #primaryBtn:hover { background: #4a8ac4; }
             #dangerBtn { background: #ef4444; color: white; border: none; }
             #dangerBtn:hover { background: #dc2626; }
-            #secondaryBtn { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-            #secondaryBtn:hover { background: #e5e7eb; }
-            QCheckBox { font-size: 12px; color: #374151; spacing: 8px; }
-            QLabel { color: #374151; font-size: 12px; }
+            #secondaryBtn { background: #3d3d3d; color: #b0b0b0; border: 1px solid #555555; }
+            #secondaryBtn:hover { background: #4a4a4a; }
+            QCheckBox { font-size: 12px; color: #b0b0b0; spacing: 8px; }
+            QLabel { color: #b0b0b0; font-size: 12px; }
+            QListWidget { background: #3d3d3d; color: #d0d0d0; border: 1px solid #555555; border-radius: 6px; }
+            QListWidget::item { padding: 6px 10px; }
+            QComboBox QAbstractItemView {
+                background: #3d3d3d;
+                color: #d0d0d0;
+                selection-background-color: #4a4a4a;
+            }
         """)
 
         main_layout = QHBoxLayout(self)
@@ -120,7 +133,7 @@ class SettingsDialog(QDialog):
 
     def _section_title(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #111827;")
+        lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #e0e0e0;")
         return lbl
 
     def _create_monitor_page(self):
@@ -180,7 +193,6 @@ class SettingsDialog(QDialog):
         self.kw_list = QListWidget()
         self.kw_list.setAlternatingRowColors(True)
         self.kw_list.itemDoubleClicked.connect(self._del_kw)
-        self.kw_list.setStyleSheet("QListWidget::item { padding: 6px 10px; }")
         f1.addWidget(self.kw_list)
         l.addWidget(gb1)
 
@@ -199,7 +211,6 @@ class SettingsDialog(QDialog):
 
         self.bl_list = QListWidget()
         self.bl_list.itemDoubleClicked.connect(self._del_bl)
-        self.bl_list.setStyleSheet("QListWidget::item { padding: 6px 10px; }")
         f2.addWidget(self.bl_list)
         l.addWidget(gb2)
 
@@ -311,7 +322,7 @@ class SettingsDialog(QDialog):
 
         hint = QLabel("\U0001f4a1 提示：本地模型推荐使用 Ollama，安装后 API 地址填 http://localhost:11434/v1/chat/completions")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        hint.setStyleSheet("color: #666666; font-size: 11px;")
         l.addWidget(hint)
         l.addStretch()
 
@@ -346,8 +357,140 @@ class SettingsDialog(QDialog):
         fl.addRow("数据库路径:", QLabel(db_path))
 
         l.addWidget(gb)
+
+        rk_gb = QGroupBox("\U0001f514 提醒关键词管理")
+        rk_layout = QVBoxLayout(rk_gb)
+        rk_layout.setSpacing(10)
+
+        hint = QLabel("配置提醒关键词，当消息内容包含这些词时将触发弹窗提醒")
+        hint.setStyleSheet("color: #888888; font-size: 11px;")
+        rk_layout.addWidget(hint)
+
+        self.rk_list = QListWidget()
+        self.rk_list.setMinimumHeight(140)
+        self.rk_list.setStyleSheet("""
+            QListWidget { background: #3d3d3d; color: #d0d0d0; border: 1px solid #555555; border-radius: 6px; }
+            QListWidget::item { padding: 8px 12px; border-bottom: 1px solid #4a4a4a; }
+            QListWidget::item:hover { background: #444444; }
+        """)
+        rk_layout.addWidget(self.rk_list)
+
+        rk_input_row = QHBoxLayout()
+        rk_input_row.setSpacing(8)
+        self.rk_input = QLineEdit()
+        self.rk_input.setPlaceholderText("输入提醒关键词...")
+        self.rk_input.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #555555;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
+                background: #3d3d3d;
+                color: #d0d0d0;
+            }
+            QLineEdit:focus { border-color: #5b9bd5; background: #444444; }
+        """)
+        rk_input_row.addWidget(self.rk_input)
+
+        add_rk_btn = QPushButton("\u2795 添加")
+        add_rk_btn.setObjectName("primaryBtn")
+        add_rk_btn.clicked.connect(self._add_reminder_kw)
+        rk_input_row.addWidget(add_rk_btn)
+        rk_layout.addLayout(rk_input_row)
+
+        rk_btn_row = QHBoxLayout()
+        rk_btn_row.setSpacing(8)
+
+        self.rk_edit_btn = QPushButton("\u270f\ufe0f 编辑")
+        self.rk_edit_btn.setObjectName("secondaryBtn")
+        self.rk_edit_btn.clicked.connect(self._edit_reminder_kw)
+        rk_btn_row.addWidget(self.rk_edit_btn)
+
+        self.rk_toggle_btn = QPushButton("\U0001f504 启用/禁用")
+        self.rk_toggle_btn.setObjectName("secondaryBtn")
+        self.rk_toggle_btn.clicked.connect(self._toggle_reminder_kw)
+        rk_btn_row.addWidget(self.rk_toggle_btn)
+
+        self.rk_del_btn = QPushButton("\U0001f5d1\ufe0f 删除")
+        self.rk_del_btn.setObjectName("dangerBtn")
+        self.rk_del_btn.clicked.connect(self._del_reminder_kw)
+        rk_btn_row.addWidget(self.rk_del_btn)
+
+        rk_btn_row.addStretch()
+        rk_layout.addLayout(rk_btn_row)
+
+        l.addWidget(rk_gb)
+
+        self._refresh_reminder_kw()
+
         l.addStretch()
         return w
+
+    def _refresh_reminder_kw(self):
+        self.rk_list.clear()
+        keywords = get_all_reminder_keywords_raw()
+        for kw in keywords:
+            status = "\u2705" if kw.get('enabled') else "\u274c"
+            item = QListWidgetItem(f"{status}  {kw.get('keyword', '')}")
+            item.setData(Qt.UserRole, kw)
+            if not kw.get('enabled'):
+                item.setForeground(Qt.gray)
+            self.rk_list.addItem(item)
+
+    def _add_reminder_kw(self):
+        kw = self.rk_input.text().strip()
+        if not kw:
+            return
+        if add_reminder_keyword(kw):
+            self.rk_input.clear()
+            self._refresh_reminder_kw()
+            self._notify_engine_reload()
+
+    def _edit_reminder_kw(self):
+        item = self.rk_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.UserRole)
+        if not data:
+            return
+
+        from PyQt5.QtWidgets import QInputDialog
+        new_kw, ok = QInputDialog.getText(
+            self, "编辑提醒关键词", "关键词:", text=data.get('keyword', '')
+        )
+        if ok and new_kw.strip() and new_kw.strip() != data.get('keyword', ''):
+            if update_reminder_keyword(data.get('id'), new_kw.strip()):
+                self._refresh_reminder_kw()
+                self._notify_engine_reload()
+
+    def _toggle_reminder_kw(self):
+        item = self.rk_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.UserRole)
+        if not data:
+            return
+        new_state = not data.get('enabled', True)
+        toggle_reminder_keyword(data.get('id'), new_state)
+        self._refresh_reminder_kw()
+        self._notify_engine_reload()
+
+    def _del_reminder_kw(self):
+        item = self.rk_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.UserRole)
+        if not data:
+            return
+        delete_reminder_keyword(data.get('id'))
+        self._refresh_reminder_kw()
+        self._notify_engine_reload()
+
+    def _notify_engine_reload(self):
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app and hasattr(app, 'engine'):
+            app.engine._reload_keywords()
 
     def _create_ui_page(self):
         w, l = self._make_page()
@@ -382,8 +525,8 @@ class SettingsDialog(QDialog):
         l.addWidget(self._section_title("\u2139\ufe0f 关于"))
 
         info = QLabel("""
-        <h2 style='color:#111827;'>微信信息管家 v0.6</h2>
-        <p style='color:#6b7280; line-height:1.8;'>
+        <h2 style='color:#e0e0e0;'>微信信息管家 v0.6</h2>
+        <p style='color:#888888; line-height:1.8;'>
         \u2705 实时消息监控与智能归类<br>
         \u2705 紧急消息弹窗提醒（持久化）<br>
         \u2705 每日简报自动汇总<br>
@@ -391,7 +534,7 @@ class SettingsDialog(QDialog):
         \u2705 AI 智能分析（支持本地/云端模型）<br>
         \u2705 延时提醒（10分钟/30分钟/1小时/3小时/1天）<br>
         </p>
-        <p style='color:#9ca3af; font-size:11px;'>
+        <p style='color:#666666; font-size:11px;'>
         本地运行 \u00b7 数据不上传 \u00b7 隐私安全
         </p>
         """)

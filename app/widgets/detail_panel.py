@@ -14,8 +14,8 @@ class DetailPanel(QFrame):
 
         self.setStyleSheet("""
             #detailPanel {
-                background: #ffffff;
-                border-left: 1px solid #e5e7eb;
+                background: #333333;
+                border-left: 1px solid #4a4a4a;
                 border-radius: 0;
             }
         """)
@@ -29,17 +29,17 @@ class DetailPanel(QFrame):
         title_font.setPointSize(14)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
-        self.title_label.setStyleSheet("color: #111827;")
+        self.title_label.setStyleSheet("color: #e0e0e0;")
         layout.addWidget(self.title_label)
 
         self.meta_bar = QLabel("")
-        self.meta_bar.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        self.meta_bar.setStyleSheet("color: #888888; font-size: 11px;")
         self.meta_bar.setWordWrap(True)
         layout.addWidget(self.meta_bar)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #e5e7eb; max-height: 1px;")
+        line.setStyleSheet("background: #4a4a4a; max-height: 1px;")
         layout.addWidget(line)
 
         self.content_edit = QPlainTextEdit()
@@ -49,7 +49,7 @@ class DetailPanel(QFrame):
                 border: none;
                 background: transparent;
                 font-size: 13px;
-                color: #374151;
+                color: #d0d0d0;
                 line-height: 1.6;
             }
         """)
@@ -71,7 +71,7 @@ class DetailPanel(QFrame):
         self.meta_bar.setText(meta)
 
         text = ""
-        for m in msgs[-80:]:
+        for m in msgs[:80]:
             time_str = m.get('time', '')
             sender = m.get('sender', '')
             content = m.get('content', '')
