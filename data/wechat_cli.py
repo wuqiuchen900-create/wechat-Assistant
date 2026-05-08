@@ -32,7 +32,7 @@ print(f"[自动检测] wechat-cli 调用命令: {WECHAT_CLI_CMD}")
 _sessions_cache = []
 _sessions_cache_time = 0
 
-def run_wechat_cli(command):
+def run_wechat_cli(command, timeout=60):
     """执行 wechat-cli 命令并返回 JSON 结果"""
     try:
         env = os.environ.copy()
@@ -43,7 +43,7 @@ def run_wechat_cli(command):
             capture_output=True,
             text=True,
             shell=False,
-            timeout=30,
+            timeout=timeout,
             env=env,
             encoding='utf-8',
             errors='replace'
@@ -101,15 +101,30 @@ def get_new_messages():
 
 
 def _parse_history_text(text):
-    # 先检查是不是语音消息（严格检测：以 <msg> 开头且包含 voicelength）
     if text.strip().startswith('<msg>') and 'voicelength' in text:
         import re as _re
-        match = _re.search(r'voicelength="(\d+)"', text)
-        duration = int(match.group(1)) // 1000 if match else 0
+        duration_match = _re.search(r'voicelength="(\d+)"', text)
+        duration = int(duration_match.group(1)) // 1000 if duration_match else 0
         label = f"[语音 {duration}秒]" if duration > 0 else "[语音]"
-        return {'time': '', 'sender': '', 'content': label}
-    
-    # 原有正则匹配逻辑：[时间] 发送者: 内容
+
+        time_str = ''
+        sender = ''
+        time_match = _re.search(r'\[(.+?)\]', text)
+        if time_match:
+            time_str = time_match.group(1)
+        sender_match = _re.search(r'\]\s*(.+?):', text)
+        if sender_match:
+            sender = sender_match.group(1)
+
+        return {
+            'time': time_str,
+            'sender': sender,
+            'content': label,
+            'is_voice': True,
+            'voice_duration': duration,
+            'voice_xml': text
+        }
+
     match = re.match(r'\[(.+?)\]\s*(.+?):\s*(.*)', text)
     if match:
         return {
@@ -117,8 +132,7 @@ def _parse_history_text(text):
             'sender': match.group(2),
             'content': match.group(3)
         }
-    
-    # 如果都没匹配到，返回 None
+
     return None
 
 def get_sessions_list(limit=200):

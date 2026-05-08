@@ -12,6 +12,7 @@ from core.reminder_manager import (
     acknowledge_reminder, snooze_reminder, dismiss_reminder,
     count_pending_reminders
 )
+from core.event_tracker import start_event_tracker, run_analysis_now
 from debug_log import logger
 
 
@@ -52,6 +53,9 @@ class WeChatAssistantTray(QSystemTrayIcon):
         self._reminder_timer.start(30000)
 
         QTimer.singleShot(5000, self._check_pending_reminders)
+
+        start_event_tracker(interval_minutes=30)
+        QTimer.singleShot(120000, lambda: run_analysis_now())
 
         self.menu = QMenu()
         self.menu.setStyleSheet("""

@@ -9,6 +9,7 @@ from debug_log import logger
 from app.widgets import ShimmerProgressBar, SessionListPanel, DetailPanel, StatsBar
 from app.widgets.daily_brief import DailyBriefPanel
 from app.widgets.history_search import HistorySearchPanel
+from app.widgets.event_panel import EventPanel
 from core.data_manager import count_messages, get_all_blacklist
 from core.ai_search import AISearchEngine
 from app.styles import GLOBAL_STYLE
@@ -64,11 +65,14 @@ class MainWindow(QMainWindow):
         self.btn_history = QPushButton("\U0001f50d  历史检索")
         self.btn_history.setObjectName("navBtn")
         self.btn_history.setCheckable(True)
+        self.btn_events = QPushButton("\U0001f4c5  事件追踪")
+        self.btn_events.setObjectName("navBtn")
+        self.btn_events.setCheckable(True)
         self.btn_settings = QPushButton("\u2699\ufe0f  设置")
         self.btn_settings.setObjectName("navBtn")
         self.btn_settings.setCheckable(True)
 
-        for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_settings]:
+        for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_events, self.btn_settings]:
             nav_layout.addWidget(btn)
         nav_layout.addStretch()
 
@@ -76,12 +80,14 @@ class MainWindow(QMainWindow):
         self.nav_group.addButton(self.btn_realtime)
         self.nav_group.addButton(self.btn_report)
         self.nav_group.addButton(self.btn_history)
+        self.nav_group.addButton(self.btn_events)
         self.nav_group.addButton(self.btn_settings)
         self.nav_group.setExclusive(True)
 
         self.btn_realtime.clicked.connect(lambda: self._switch_page(0))
         self.btn_report.clicked.connect(lambda: self._switch_page(1))
         self.btn_history.clicked.connect(lambda: self._switch_page(2))
+        self.btn_events.clicked.connect(lambda: self._switch_page(3))
         self.btn_settings.clicked.connect(self._open_settings)
 
         footer = QLabel("v0.6  \u00b7  本地运行")
@@ -99,10 +105,12 @@ class MainWindow(QMainWindow):
         self.realtime_page = self._build_realtime_page()
         self.brief_page = DailyBriefPanel()
         self.history_page = HistorySearchPanel()
+        self.event_page = EventPanel()
 
         self.page_stack.addWidget(self.realtime_page)
         self.page_stack.addWidget(self.brief_page)
         self.page_stack.addWidget(self.history_page)
+        self.page_stack.addWidget(self.event_page)
 
         right_outer.addWidget(self.page_stack)
         main_layout.addLayout(right_outer)
@@ -153,11 +161,11 @@ class MainWindow(QMainWindow):
         return page
 
     def _switch_page(self, index):
-        for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_settings]:
+        for btn in [self.btn_realtime, self.btn_report, self.btn_history, self.btn_events, self.btn_settings]:
             btn.setChecked(False)
-        [self.btn_realtime, self.btn_report, self.btn_history, self.btn_settings][index].setChecked(True)
+        [self.btn_realtime, self.btn_report, self.btn_history, self.btn_events, self.btn_settings][index].setChecked(True)
 
-        if index == 3:
+        if index == 4:
             self._open_settings()
             return
 
@@ -165,6 +173,8 @@ class MainWindow(QMainWindow):
 
         if index == 1:
             self.brief_page.refresh()
+        elif index == 3:
+            self.event_page.load_events()
 
     def _open_settings(self):
         from app.settings_dialog import SettingsDialog

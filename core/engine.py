@@ -12,6 +12,7 @@ from core.data_manager import (
     get_all_reminder_keywords
 )
 from core.sync_worker import SyncWorker, IncrementalSyncWorker
+from core.voice_transcriber import save_voice_message, get_voice_manager
 from concurrent.futures import ThreadPoolExecutor
 from debug_log import logger
 
@@ -97,6 +98,10 @@ class MessageEngine(QThread):
         for msg in messages:
             if self._is_blacklisted(msg):
                 continue
+
+            if msg.get('is_voice'):
+                save_voice_message(msg)
+
             content = msg.get('content', '')
             msg['is_urgent'] = any(kw in content for kw in self._urgent_keywords)
             msg['is_work'] = any(kw in content for kw in self._work_keywords)
@@ -238,6 +243,12 @@ class MessageEngine(QThread):
                 self._reload_keywords()
                 self._reload_blacklist()
                 self._reload_reminder_settings()
+            if loop_count % 10 == 0:
+                try:
+                    voice_mgr = get_voice_manager()
+                    voice_mgr.process_pending()
+                except Exception as e:
+                    logger.error(f"[语音转写轮询错误] {e}")
             try:
                 new_msgs = []
                 latest_msgs = get_new_messages()

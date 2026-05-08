@@ -73,8 +73,9 @@ class SyncWorker(QObject):
         total = len(sessions)
         logger.info(f"[SyncWorker] 开始全量同步，共 {total} 个会话")
         
-        BATCH_SIZE = 50  # 每 50 个会话发一次信号
-        
+        BATCH_SIZE = 50
+        synced_chats = set()
+
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {}
             for session in sessions:
@@ -100,18 +101,17 @@ class SyncWorker(QObject):
                 msgs = future.result()
                 
                 if msgs:
-                    # 记录最后消息时间
                     last_msg_time = msgs[0].get('time', '')
                     normalized_time = _normalize_time(last_msg_time)
                     try:
                         last_ts = int(datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M').timestamp())
                     except:
                         last_ts = 0
-                    
+
                     update_sync_progress(chat_name, normalized_time, last_ts)
                     self.changed_chats.add(chat_name)
-                    
-                    # 加入当前批次
+                    synced_chats.add(chat_name)
+
                     batch_msgs.extend(msgs)
                 
                 # 每完成 BATCH_SIZE 个会话，或者全部完成，就写库并发信号
@@ -131,34 +131,75 @@ class SyncWorker(QObject):
                 time.sleep(0.05)
 
         logger.info(f"[SyncWorker] 全量同步完成, completed={completed}, total={total}")
+        self._fill_missing_sessions(sessions, synced_chats)
         self.finished_signal.emit()
         if self.finished_callback:
             self.finished_callback()
 
+    def _fill_missing_sessions(self, all_sessions, synced_chats):
+        missing = [s for s in all_sessions if s.get('chat', '') not in synced_chats]
+        if not missing:
+            return
+        logger.info(f"[SyncWorker] 发现 {len(missing)} 个遗漏会话，开始补齐...")
+        for session in missing:
+            chat_name = session.get('chat', '')
+            if not chat_name:
+                continue
+            msgs = self._fetch_one_chat(
+                chat_name,
+                session.get('is_group', False),
+                session.get('username', '')
+            )
+            if msgs:
+                last_msg_time = msgs[0].get('time', '')
+                normalized_time = _normalize_time(last_msg_time)
+                try:
+                    last_ts = int(datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M').timestamp())
+                except:
+                    last_ts = 0
+                update_sync_progress(chat_name, normalized_time, last_ts)
+                self.changed_chats.add(chat_name)
+                save_messages_batch_with_conn(msgs)
+                self.messages_ready.emit(msgs)
+                logger.info(f"[SyncWorker] 补齐遗漏会话 {chat_name}: +{len(msgs)}条")
+            time.sleep(0.3)
+
     def _fetch_one_chat(self, chat_name, is_group, username):
-        """拉取单个会话的历史消息（在子线程中执行）"""
         from data.wechat_cli import run_wechat_cli, _parse_history_text
 
-        cmd = f'history "{chat_name}" --limit 50000'
-        data = run_wechat_cli(cmd)
-        if not isinstance(data, dict):
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                cmd = f'history "{chat_name}" --limit 50000'
+                data = run_wechat_cli(cmd, timeout=90)
+                if isinstance(data, dict):
+                    raw_messages = data.get('messages', [])
+                    if isinstance(raw_messages, list):
+                        result = []
+                        for msg_text in raw_messages:
+                            if not isinstance(msg_text, str):
+                                continue
+                            parsed = _parse_history_text(msg_text)
+                            if parsed:
+                                parsed['chat'] = chat_name
+                                parsed['is_group'] = is_group
+                                parsed['username'] = username
+                                result.append(parsed)
+                        if result:
+                            return result
 
-        raw_messages = data.get('messages', [])
-        if not isinstance(raw_messages, list):
-            return []
+                if attempt < max_retries - 1:
+                    wait = (attempt + 1) * 3
+                    logger.warning(f"[SyncWorker] {chat_name} 拉取失败，{wait}秒后重试 ({attempt + 1}/{max_retries})")
+                    time.sleep(wait)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = (attempt + 1) * 3
+                    logger.warning(f"[SyncWorker] {chat_name} 拉取异常: {e}，{wait}秒后重试 ({attempt + 1}/{max_retries})")
+                    time.sleep(wait)
 
-        result = []
-        for msg_text in raw_messages:
-            if not isinstance(msg_text, str):
-                continue
-            parsed = _parse_history_text(msg_text)
-            if parsed:
-                parsed['chat'] = chat_name
-                parsed['is_group'] = is_group
-                parsed['username'] = username
-                result.append(parsed)
-        return result
+        logger.error(f"[SyncWorker] {chat_name} 拉取最终失败，已重试 {max_retries} 次")
+        return []
 
 
 class IncrementalSyncWorker(QObject):
@@ -184,6 +225,7 @@ class IncrementalSyncWorker(QObject):
         sessions = get_sessions_list(limit=500)
         total = len(sessions)
         db_conn = get_conn()
+        synced_chats = set()
         logger.info(f"[IncWorker] 开始增量同步，共 {total} 个会话")
         
         for i, session in enumerate(sessions):
@@ -237,13 +279,44 @@ class IncrementalSyncWorker(QObject):
                 update_sync_progress(chat_name, normalized_time, last_ts)
             
             self.changed_chats.add(chat_name)
+            synced_chats.add(chat_name)
             self.progress_signal.emit(i + 1, total)
             self.messages_ready.emit(msgs)
             time.sleep(0.1)
 
         db_conn.close()
+        self._fill_missing_sessions(sessions, synced_chats)
         logger.info(f"[IncWorker] 增量同步完成, 即将发射 finished_signal")
         self.finished_signal.emit()
         logger.info("[IncWorker] finished_signal 已发射")
         if self.finished_callback:
             self.finished_callback()
+
+    def _fill_missing_sessions(self, all_sessions, synced_chats):
+        missing = [s for s in all_sessions if s.get('chat', '') not in synced_chats]
+        if not missing:
+            return
+        logger.info(f"[IncWorker] 发现 {len(missing)} 个遗漏会话，开始补齐...")
+        for session in missing:
+            chat_name = session.get('chat', '')
+            if not chat_name:
+                continue
+            msgs = get_history_since(chat_name, limit=50000)
+            if msgs:
+                is_group = session.get('is_group', False)
+                username = session.get('username', '')
+                for m in msgs:
+                    m['is_group'] = is_group
+                    m['username'] = username
+                last_msg_time = msgs[0].get('time', '')
+                normalized_time = _normalize_time(last_msg_time)
+                try:
+                    last_ts = int(datetime.datetime.strptime(normalized_time, '%Y-%m-%d %H:%M').timestamp())
+                except:
+                    last_ts = 0
+                update_sync_progress(chat_name, normalized_time, last_ts)
+                self.changed_chats.add(chat_name)
+                save_messages_batch_with_conn(msgs)
+                self.messages_ready.emit(msgs)
+                logger.info(f"[IncWorker] 补齐遗漏会话 {chat_name}: +{len(msgs)}条")
+            time.sleep(0.3)
